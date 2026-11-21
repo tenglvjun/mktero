@@ -34,7 +34,7 @@ export function createFigureInputFromIR(ir, serialized, bundle = {}) {
     for (const piece of serialized.pieces) {
         if (piece.part === 'composite' || !Number.isSafeInteger(piece.pageIndex)) continue;
         const source = blocksByID.get(piece.blockId);
-        const pushSource = block => push({ ...block, ...nativeFigurePiece(source, piece) });
+        const pushSource = block => push({ ...block, ...nativeFigurePiece(source, piece, serialized.markdown) });
         const bbox = validBBox(piece.bbox);
         const range = [{ from: piece.from, to: piece.to }];
         if (piece.part === 'panel' || source.pdfFigureProposal && source.kind === 'table'
@@ -119,21 +119,24 @@ export function createFigureInputFromIR(ir, serialized, bundle = {}) {
 // Keep table Markdown intact until PDF image evidence proves that it is a
 // fragment of a figure. These annotations never turn a table into a panel in
 // the ordinary layout resolver.
-function nativeFigurePiece(source, piece) {
+function nativeFigurePiece(source, piece, markdown) {
     const figure = source?.pdfFigure || source?.pdfFigureProposal;
     if (!figure || typeof figure.id !== 'string' || !figure.id
         || typeof figure.text !== 'string' || figure.text.length > FIGURE_LIMITS.maxCaptionLength
         || typeof figure.label !== 'string' || !/^(?:fig(?:ure)?|chart|scheme|algorithm)\b/iu.test(figure.label)
         || !validBBox(figure.bbox)) return {};
-    const caption = piece.part === 'caption' || piece.key === `${source.id}:caption`;
+    const caption = piece.part === 'caption' || piece.key === `${source.id}:caption`
+        || source.id === figure.sourceBlockId && piece.part === 'text';
     const tableBody = source.kind === 'table'
         && (piece.key === `${source.id}:body` || piece.key === source.children.find(child => child.kind === 'body')?.id);
-    if (caption && source.children.some(child => child.id === piece.key && child.pdfPanelLabel)) return {
+    if (caption && source.children.some(child => child.id === piece.key
+        && (child.pdfPanelLabel || child.pdfPanelDescription))) return {
         pdfFigure: figure, pdfFigurePart: 'text', type: 'caption', role: 'caption',
     };
     if (caption) return {
         pdfFigure: figure, pdfFigurePart: 'caption', type: 'caption', role: 'caption',
-        bbox: [...figure.bbox], text: boundedText(figure.text),
+        bbox: [...figure.bbox], text: boundedText(source.id === figure.sourceBlockId
+            ? markdown.slice(piece.from, piece.to) : figure.text),
     };
     if (piece.part === 'panel' || tableBody) return {
         pdfFigure: figure, pdfFigurePart: 'panel',

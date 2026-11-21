@@ -7,8 +7,9 @@ import { textBox, verifyPDFPanelPixels } from './pdfjs-figure-evidence.js';
 // Only this path may put them back together, and only after the page proves a
 // single image container owns every fragment, each fragment's own pixels match
 // the page, and the caption found in the PDF's own text is complete, unique,
-// and printed outside the image. By default the crop is the native container:
-// an OCR box may include white margins and a baked-in caption.
+// and printed outside the image. The crop starts from the native container:
+// an OCR box may include white margins and a baked-in caption. Owned text may
+// extend it only by small OCR edge errors after the container proves ownership.
 //
 // A mixed figure can also be drawn partly as vector paths outside its raster
 // container (a table panel beside vector plots, or labels and axes drawn as
@@ -16,6 +17,7 @@ import { textBox, verifyPDFPanelPixels } from './pdfjs-figure-evidence.js';
 // paths stay in the crop, but only after the same container, caption, pixel,
 // foreign-text and selectable-text checks pass.
 const MIN_INSIDE_RATIO = 0.6;
+const OWNED_TEXT_EDGE_TOLERANCE = 10;
 const MAX_CROP_GROWTH = 1.6;
 const MAX_IMAGE_AREA = 750_000;
 const CAPTION_PROXIMITY = 60;
@@ -27,12 +29,15 @@ const MAX_CAPTION_ITEMS = 64;
 export async function inspectDocumentFigureImage(page, request, {
     createCanvas, decodeImage, signal, limits,
 }) {
+    const ownedText = request?.ownedTextLocations === undefined ? [] : request.ownedTextLocations;
     if (typeof decodeImage !== 'function' || !Array.isArray(request?.panels)
         || request.panels.length < 1 || request.panels.length > limits.maxPanels
         || request.panels.some(panel => !validBox(panel?.bbox) || !panel.asset)
         || new Set(request.panels.map(panel => panel.id)).size !== request.panels.length
         || !validCaption(request.caption)
         || !validPanelBoundsMode(request)
+        || !Array.isArray(ownedText) || ownedText.length > limits.maxLayoutBlocks
+        || ownedText.some(location => !validBox(location?.bbox))
         || !Array.isArray(request.foreignLocations)
         || request.foreignLocations.length > limits.maxLayoutBlocks
         // An unusable foreign box cannot be proven disjoint from the crop, so it
@@ -60,7 +65,7 @@ export async function inspectDocumentFigureImage(page, request, {
         // a huge page cannot turn these scans into unbounded work.
         let comparisons = 0;
         const charge = count => (comparisons += count) <= limits.maxComparisons;
-        if (!charge(boxes.length * (request.panels.length + blocked.length))) return null;
+        if (!charge(boxes.length * (request.panels.length + blocked.length + ownedText.length))) return null;
         // The container must own every fragment: each OCR box keeps at least
         // MIN_INSIDE_RATIO of its area inside it. An OCR box may also contain
         // vector margins or a caption; pixels are checked over its full extent.
@@ -68,18 +73,23 @@ export async function inspectDocumentFigureImage(page, request, {
         const containers = boxes.filter(box => area(box) <= MAX_IMAGE_AREA
             && area(box) <= area(union) * MAX_CROP_GROWTH
             && request.panels.every(panel => insideRatio(box, panel.bbox) >= MIN_INSIDE_RATIO)
+            // OCR panel descriptions may sit just beyond their image crop.
+            // Prove every location belongs to this native container before any
+            // union; neither other text boxes nor vector margins prove ownership.
+            && ownedText.every(location => containsOwnedText(box, location.bbox))
             && !blocked.some(location => intersection(box, location) > 1));
         if (containers.length !== 1) return null;
         const container = containers[0];
-        // The OCR boxes can extend past the raster container over vector paths
-        // that belong to the same figure. Keep those paths only in the explicit
-        // mode, and only when the wider crop stays bounded and clear of every
-        // foreign box. The native container remains the evidence that this is
-        // one picture; the union is only the crop extent.
-        if (preservePanelBounds && !charge(request.panels.length + blocked.length)) return null;
-        const bbox = preservePanelBounds
-            ? expandedPanelBounds(container, request.panels, blocked)
-            : container;
+        // Only after the native container owns every fragment and description
+        // may their boxes extend the crop. Keep small text edge errors in both
+        // modes, and vector panel margins only when explicitly requested. The
+        // combined extent must pass the same growth and foreign-content checks.
+        const extensions = [
+            ...(preservePanelBounds ? request.panels.map(panel => panel.bbox) : []),
+            ...ownedText.map(location => location.bbox),
+        ];
+        if (extensions.length && !charge(extensions.length + blocked.length)) return null;
+        const bbox = extensions.length ? expandedCropBounds(container, extensions, blocked) : container;
         if (!bbox) return null;
         const text = await waitForFigureOperation(page.getTextContent(), signal);
         if (!Array.isArray(text.items) || text.items.length > limits.maxLayoutBlocks) return null;
@@ -93,9 +103,9 @@ export async function inspectDocumentFigureImage(page, request, {
             || !nearContainer(bbox, captionBox)) return null;
         // Real PDF text inside the container means the region is not one raster
         // image; consuming it would delete selectable article text. The verified
-        // caption and its first line are the only permitted native text. In the
-        // expanded mode the whole crop is checked, not only the raster box, so
-        // the extra vector margins cannot swallow article text either.
+        // caption and its first line are the only permitted native text. Check
+        // the whole crop so neither text edge errors nor vector margins can
+        // swallow article text.
         if (text.items.some(item => {
             const box = textBox(item, viewport);
             return box && intersection(box, bbox) > 1
@@ -125,13 +135,11 @@ function validPanelBoundsMode(request) {
         || request.preservePanelBounds === false;
 }
 
-// The union of the native container and every OCR panel box. The container
-// still proves the fragments are one picture; the panel boxes keep the vector
-// paths and labels that sit outside the raster but inside the OCR fragment.
-// The growth and area bounds are the same ones the container must satisfy, so
-// a hostile request cannot expand the crop across the page.
-function expandedPanelBounds(container, panels, blocked) {
-    const union = unionBoxes([container, ...panels.map(panel => panel.bbox)]);
+// The native container proves ownership before these boxes can extend it.
+// Bound the combined panel margins and owned-text edge errors so neither kind
+// of extension can bypass the growth, area or foreign-layout safeguards.
+function expandedCropBounds(container, extensions, blocked) {
+    const union = unionBoxes([container, ...extensions]);
     if (!validBox(union) || area(union) > MAX_IMAGE_AREA
         || area(union) > area(container) * MAX_CROP_GROWTH
         || blocked.some(location => intersection(union, location) > 1)) return null;
@@ -238,6 +246,14 @@ function imageBoxes(coordinates, limits) {
         if (validBox(box)) boxes.push(box);
     }
     return boxes;
+}
+
+function containsOwnedText(outer, inner) {
+    return inner[0] >= outer[0] - OWNED_TEXT_EDGE_TOLERANCE
+        && inner[1] >= outer[1] - OWNED_TEXT_EDGE_TOLERANCE
+        && inner[2] <= outer[2] + OWNED_TEXT_EDGE_TOLERANCE
+        && inner[3] <= outer[3] + OWNED_TEXT_EDGE_TOLERANCE
+        && insideRatio(outer, inner) >= MIN_INSIDE_RATIO;
 }
 
 function insideRatio(outer, inner) {

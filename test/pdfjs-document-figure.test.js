@@ -57,7 +57,7 @@ function fragmentedCaption(text, left, top) {
 function fixture({ split = false, wrongPixels = false, duplicateImage = false,
     foreignText = false, nativeText = false, captionText = CAPTION.text,
     captionLines = false, fullPage = false, captionItems = false,
-    vectorMargin = false } = {}) {
+    vectorMargin = false, edgeText = false } = {}) {
     const picture = createCanvas(PICTURE.pixels.width, PICTURE.pixels.height);
     const context = picture.getContext('2d');
     context.fillStyle = '#ffffff';
@@ -156,6 +156,9 @@ function fixture({ split = false, wrongPixels = false, duplicateImage = false,
         + (duplicateImage ? `q ${placementMatrix} cm /Im Do Q\n` : '')
         + `${captionLine}\n`
         + (nativeText ? 'BT /F 14 Tf 300 500 Td (Printed inside the image) Tj ET\n' : '')
+        // Small selectable text wholly outside the raster, in the narrow strip
+        // that an owned OCR edge error would add to the crop.
+        + (edgeText ? `BT /F 2 Tf 135 ${PAGE.height - points(300, 'y')} Td (Body) Tj ET\n` : '')
         + (foreignText ? vectorMargin
             ? `BT /F 14 Tf 100 ${PAGE.height - points(300, 'y')} Td (Body) Tj ET\n`
             : 'BT /F 14 Tf 100 120 Td (Article body text below the image) Tj ET\n' : '');
@@ -323,6 +326,167 @@ test('keeps vector margins outside the native container only when requested', as
     assert.ok(h.released());
 });
 
+test('includes verified owned-text edge errors in the actual rendered crop', async () => {
+    const sample = fixture();
+    const h = harness();
+    try {
+        const session = await h.renderer.open(sample.fileData);
+        const original = await session.recoverImageGroup(sample.request);
+        assert.ok(original);
+        for (const bbox of [
+            [200, 550, 400, 600],
+            [135, 150, 175, 180],
+            [730, 200, original.bbox[2] + 1.585, 230],
+            [200, 100, 300, 130],
+            [200, 590, 300, original.bbox[3] + 10],
+            [135, 100, 175, 150],
+            [original.bbox[0] - 10, 200, original.bbox[0] + 15, 230], // Exactly 10 beyond the edge and 60% inside.
+        ]) {
+            for (const preservePanelBounds of [false, true]) {
+                const result = await session.recoverImageGroup({ ...sample.request,
+                    preservePanelBounds, ownedTextLocations: [{ bbox }] });
+                assert.ok(result, JSON.stringify({ bbox, preservePanelBounds }));
+                const boxes = [original.bbox, bbox,
+                    ...(preservePanelBounds ? sample.request.panels.map(panel => panel.bbox) : [])];
+                assert.deepEqual(result.bbox, [
+                    Math.min(...boxes.map(box => box[0])), Math.min(...boxes.map(box => box[1])),
+                    Math.max(...boxes.map(box => box[2])), Math.max(...boxes.map(box => box[3])),
+                ], 'The actual rendered crop must fully contain owned text for the replacement transaction');
+                assert.ok(result.crop.data.byteLength > 0);
+            }
+        }
+    }
+    finally { await h.renderer.disposeAll(); }
+    assert.ok(h.released());
+});
+
+for (const [edge, bbox] of [
+    ['left', [125, 200, 200, 230]],
+    ['right', [700, 200, 780, 230]],
+    ['top', [200, 90, 300, 130]],
+    ['bottom', [200, 590, 300, 630]],
+    ['outside a nearby edge', [761, 200, 765, 230]],
+    ['less than 60% inside', [135, 200, 146, 230]],
+]) {
+    test(`rejects a panel description beyond the native image ${edge}`, async () => {
+        const sample = fixture();
+        const h = harness();
+        try {
+            const session = await h.renderer.open(sample.fileData);
+            assert.equal(await session.recoverImageGroup({ ...sample.request, ownedTextLocations: [{ bbox }] }), null);
+            assert.equal(h.decoded(), 0, 'Missing ownership must fail before decoding OCR panels');
+        }
+        finally { await h.renderer.disposeAll(); }
+        assert.ok(h.released());
+    });
+}
+
+test('does not use vector margins to authorize consuming text outside the native image', async () => {
+    const sample = fixture({ vectorMargin: true });
+    const h = harness();
+    try {
+        const session = await h.renderer.open(sample.fileData);
+        assert.equal(await session.recoverImageGroup({ ...sample.request, preservePanelBounds: true,
+            ownedTextLocations: [{ bbox: [95, 200, 110, 230] }] }), null);
+        assert.equal(h.decoded(), 0);
+    }
+    finally { await h.renderer.disposeAll(); }
+    assert.ok(h.released());
+});
+
+test('does not use another owned text box or vector margins as ownership evidence', async () => {
+    const sample = fixture({ vectorMargin: true });
+    const h = harness();
+    try {
+        const session = await h.renderer.open(sample.fileData);
+        for (const preservePanelBounds of [false, true]) {
+            const request = { ...sample.request, preservePanelBounds,
+                ownedTextLocations: [{ bbox: [135, 200, 175, 230] }] };
+            assert.ok(await session.recoverImageGroup(request));
+            const before = h.decoded();
+            assert.equal(await session.recoverImageGroup({ ...request, ownedTextLocations: [
+                ...request.ownedTextLocations, { bbox: [126, 200, 180, 230] },
+            ] }), null, 'Each description must pass against the original native image before union');
+            assert.equal(h.decoded(), before);
+        }
+    }
+    finally { await h.renderer.disposeAll(); }
+    assert.ok(h.released());
+});
+
+for (const [kind, bbox] of [
+    ['article body', [130, 200, 139, 230]],
+    ['another figure caption', [132, 350, 139, 370]],
+]) {
+    test(`rejects an owned-text edge extension that would swallow ${kind}`, async () => {
+        const sample = fixture();
+        const h = harness();
+        try {
+            const session = await h.renderer.open(sample.fileData);
+            for (const preservePanelBounds of [false, true]) {
+                const request = { ...sample.request, preservePanelBounds, foreignLocations: [{ bbox }] };
+                assert.ok(await session.recoverImageGroup(request), 'The native image alone is clear of foreign layout');
+                const before = h.decoded();
+                assert.equal(await session.recoverImageGroup({ ...request,
+                    ownedTextLocations: [{ bbox: [135, 150, 175, 180] }] }), null);
+                assert.equal(h.decoded(), before, 'Unsafe edge growth must fail before panel decoding');
+            }
+        }
+        finally { await h.renderer.disposeAll(); }
+        assert.ok(h.released());
+    });
+}
+
+test('rejects owned-text edge growth over selectable PDF text without foreign layout evidence', async () => {
+    const sample = fixture({ edgeText: true });
+    const h = harness();
+    try {
+        const session = await h.renderer.open(sample.fileData);
+        assert.ok(await session.recoverImageGroup(sample.request), 'The PDF text is outside the native image');
+        for (const preservePanelBounds of [false, true]) {
+            const before = h.decoded();
+            assert.equal(await session.recoverImageGroup({ ...sample.request, preservePanelBounds,
+                ownedTextLocations: [{ bbox: [135, 150, 175, 180] }] }), null);
+            assert.equal(h.decoded(), before);
+        }
+    }
+    finally { await h.renderer.disposeAll(); }
+    assert.ok(h.released());
+});
+
+test('checks the growth cap against combined panel margins and owned-text edge errors', async () => {
+    const sample = fixture();
+    const h = harness();
+    try {
+        const session = await h.renderer.open(sample.fileData);
+        const panel = sample.request.panels[0];
+        const wideBox = [0, panel.bbox[1], 985, panel.bbox[3]];
+        assert.ok((wideBox[2] - wideBox[0]) / PICTURE.width < 1.6,
+            'The panel extension alone is within the growth limit');
+        assert.equal(await session.recoverImageGroup({ ...sample.request, preservePanelBounds: true,
+            panels: [{ ...panel, bbox: wideBox }],
+            ownedTextLocations: [{ bbox: [200, 100, 300, 130] }] }), null);
+        assert.equal(h.decoded(), 0, 'Combined growth must be bounded before pixel verification');
+    }
+    finally { await h.renderer.disposeAll(); }
+    assert.ok(h.released());
+});
+
+test('charges native container comparisons for every owned text location', async () => {
+    const sample = fixture();
+    const h = harness({ limits: { maxComparisons: 80 } });
+    try {
+        const session = await h.renderer.open(sample.fileData);
+        assert.ok(await session.recoverImageGroup(sample.request), 'The original request fits within the budget');
+        const before = h.decoded();
+        assert.equal(await session.recoverImageGroup({ ...sample.request,
+            ownedTextLocations: Array.from({ length: 80 }, () => ({ bbox: [200, 550, 400, 600] })) }), null);
+        assert.equal(h.decoded(), before, 'Owned text work must exhaust the budget before further decoding');
+    }
+    finally { await h.renderer.disposeAll(); }
+    assert.ok(h.released());
+});
+
 test('rejects expanded panel bounds that would swallow foreign text', async () => {
     const sample = fixture({ vectorMargin: true });
     const panel = sample.request.panels[0].bbox;
@@ -373,14 +537,24 @@ for (const kind of ['wrongPixels', 'duplicateImage', 'nativeText', 'foreignOverl
 }
 
 test('rejects malformed document-figure requests before decoding any panel', async () => {
-    for (const kind of ['panels', 'caption', 'foreign', 'budget', 'panel-bounds-mode']) {
+    for (const kind of ['panels', 'caption', 'foreign', 'budget', 'panel-bounds-mode',
+        'owned-type', 'owned-null', 'owned-bbox', 'owned-reversed', 'owned-nan', 'owned-count']) {
         const sample = fixture();
         const request = structuredClone(sample.request);
         if (kind === 'panels') request.panels[0].bbox = [300, 300, 200, 200];
         if (kind === 'caption') request.caption.text = '';
         if (kind === 'foreign') request.foreignLocations.push({ bbox: null });
         if (kind === 'panel-bounds-mode') request.preservePanelBounds = 'true';
-        const h = harness(kind === 'budget' ? { limits: { maxComparisons: 0 } } : {});
+        if (kind === 'owned-type') request.ownedTextLocations = {};
+        if (kind === 'owned-null') request.ownedTextLocations = null;
+        if (kind === 'owned-bbox') request.ownedTextLocations = [{ bbox: null }];
+        if (kind === 'owned-reversed') request.ownedTextLocations = [{ bbox: [300, 300, 200, 200] }];
+        if (kind === 'owned-nan') request.ownedTextLocations = [{ bbox: [200, 200, NaN, 300] }];
+        if (kind === 'owned-count') request.ownedTextLocations = [
+            { bbox: [200, 200, 300, 300] }, { bbox: [400, 200, 500, 300] },
+        ];
+        const h = harness(kind === 'budget' ? { limits: { maxComparisons: 0 } }
+            : kind === 'owned-count' ? { limits: { maxLayoutBlocks: 1 } } : {});
         try {
             const session = await h.renderer.open(sample.fileData);
             assert.equal(await session.recoverImageGroup(request), null);
