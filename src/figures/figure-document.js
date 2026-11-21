@@ -57,14 +57,21 @@ export function documentFigureRequest(input, candidate, budget) {
     const page = input.pages.find(value => value.pageIndex === candidate.pageIndex);
     if (!page || page.coordinateFrame !== 'display-cropbox' || page.geometryReason
         || !Number.isFinite(page.rotation)) return null;
-    budget.remaining -= input.blocks.length + input.assets.length;
+    const ownedIds = candidate.ownedTextBlockIds;
+    if (!Array.isArray(ownedIds) || ownedIds.length > FIGURE_LIMITS.maxLayoutBlocks
+        || ownedIds.some(id => typeof id !== 'string' || !id)
+        || new Set(ownedIds).size !== ownedIds.length) return null;
+    budget.remaining -= input.blocks.length + input.assets.length + ownedIds.length;
     if (budget.remaining < 0) return null;
     const byID = new Map(input.blocks.map(block => [block.id, block]));
     const assets = new Map(input.assets.map(asset => [normalizeFigureAssetPath(asset.path), asset]));
     const panels = candidate.panelBlockIds.map(id => byID.get(id));
+    const ownedText = ownedIds.map(id => byID.get(id));
     const caption = byID.get(candidate.captionBlockIds[0]);
     if (!caption?.pdfFigure || panels.some(block => !resolved(block) || !validBox(block.bbox)
-        || !block.assetPath || block.pdfFigure?.id !== caption.pdfFigure.id)) return null;
+        || !block.assetPath || block.pdfFigure?.id !== caption.pdfFigure.id)
+        || ownedText.some(block => !resolved(block) || !validBox(block.bbox)
+            || block.pageIndex !== candidate.pageIndex || block.pdfFigure?.id !== caption.pdfFigure.id)) return null;
     const members = new Set([...candidate.panelBlockIds, ...candidate.captionBlockIds, ...candidate.ownedTextBlockIds]);
     const foreignLocations = [];
     for (const block of input.blocks) {
@@ -87,15 +94,24 @@ export function documentFigureRequest(input, candidate, budget) {
         mode: 'document-figure', pageIndex: candidate.pageIndex, panels: requestPanels,
         ...(candidate.preservePanelBounds === true ? { preservePanelBounds: true } : {}),
         caption: { label: candidate.label, text: caption.pdfFigure.text, bbox: [...candidate.captionBBox] },
+        ...(ownedText.length ? { ownedTextLocations: ownedText.map(block => ({ bbox: [...block.bbox] })) } : {}),
         foreignLocations,
     };
 }
 
 export function documentFigureCandidate(candidate, request, result, page) {
+    const ownedText = request.ownedTextLocations === undefined ? [] : request.ownedTextLocations;
+    if (!Array.isArray(ownedText) || ownedText.length > FIGURE_LIMITS.maxLayoutBlocks
+        || ownedText.length !== candidate.ownedTextBlockIds.length
+        || ownedText.some(location => !validBox(location?.bbox))) return null;
     if (!validBox(result?.bbox) || !validBox(result.captionBBox) || result.rotation !== page.rotation
         || intersection(result.captionBBox, request.caption.bbox) <= 0
         || intersection(result.bbox, result.captionBBox) > 0
-        || request.foreignLocations.some(location => intersection(result.bbox, location.bbox) > 0)) return null;
+        || request.foreignLocations.some(location => intersection(result.bbox, location.bbox) > 0)
+        // The worker has already proved ownership against the native image.
+        // Its actual crop must fully contain every consumed text box, matching
+        // the replacement transaction's geometry check.
+        || ownedText.some(location => !contains(result.bbox, location.bbox))) return null;
     const panelBBoxes = {};
     for (const panel of request.panels) {
         const bbox = clip(panel.bbox, result.bbox);
@@ -118,6 +134,11 @@ function resolved(block) {
 
 function validBox(box) {
     return isValidNormalizedSourceBBox(box) && box[0] < box[2] && box[1] < box[3];
+}
+
+function contains(outer, inner) {
+    return inner[0] >= outer[0] && inner[1] >= outer[1]
+        && inner[2] <= outer[2] && inner[3] <= outer[3];
 }
 
 function union(boxes) {

@@ -116,6 +116,17 @@ consumed once, so the full caption is not repeated in the body. Body references,
 incomplete readings, conflicting owners, and exhausted budgets leave the
 original paragraph intact.
 
+A picture can also carry lettered panel descriptions such as `(D) Identify a
+context` in place of its real caption. If a complete body-block legend names
+those panels and has one owner, Mktero proposes a native-image recovery without
+changing the OCR text. One unique PDF image must contain every panel description,
+the OCR image pixels must match, and the full external legend must verify. Small
+OCR box errors at the image edge are included only after that containment check;
+the final crop must remain clear of other content and native article text. A
+successful recovery preserves the descriptions inside the image and emits the
+complete selectable caption once, restoring its figure navigation entry. Any
+failed check leaves the original image, descriptions and paragraph in place.
+
 - The printed number and legend are kept as they appear in the PDF. Mktero does
   not exchange two captions because a picture looks like a different chart.
 - Full-width, multi-line legends are not treated as prose merely because they

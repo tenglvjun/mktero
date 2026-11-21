@@ -157,8 +157,10 @@ function planPage(captions, floats, pageBlocks, ordinary) {
 // so a weaker page-level caption cannot commit only half of a rejected repair.
 function planRegionCaptions(captions, floats, pageBlocks, withheld) {
     const choices = new Map(captions.map(caption => [caption, floats.flatMap(float => {
-        const score = captionScore(caption, float, pageBlocks, captions);
-        return score === null ? [] : [{ float, distance: captionDistance(caption, float) }];
+        const panelDescriptions = caption.sourceBlock && regionalPanelDescriptions(float, caption);
+        const score = captionScore(caption, panelDescriptions ? { ...float, children: [] } : float,
+            pageBlocks, captions);
+        return score === null ? [] : [{ float, distance: captionDistance(caption, float), panelDescriptions }];
     }).sort((left, right) => left.distance - right.distance)]));
     const closest = caption => {
         const pairs = choices.get(caption);
@@ -172,12 +174,55 @@ function planRegionCaptions(captions, floats, pageBlocks, withheld) {
         if (owners.length !== 1) continue;
         const destination = owners[0].float;
         if (withheld.has(destination) || destination.kind === BLOCK_KIND.TABLE
-            || captionChildren(destination).length
             || captions.some(other => other !== caption && closest(other).some(pair => pair.float === destination))) continue;
+        const descriptions = owners[0].panelDescriptions;
+        if (descriptions) {
+            const box = unionOf([visualBodyBox(destination), ...descriptions.map(child => child.bbox)]);
+            if (!closedVisualGroup([destination], box, caption, floats, pageBlocks, captions)) continue;
+            // Raster subcaptions have no native text to corroborate them. Keep
+            // all OCR content until one PDF image contains every description
+            // and its pixels and the complete external legend verify together.
+            // Match the worker against verified native glyphs; the source
+            // range still supplies the output caption's TeX and links.
+            const proposal = { ...figureMark(caption, false), text: caption.nativeText,
+                sourceBlockId: caption.sourceBlock.id };
+            destination.pdfFigureProposal = proposal;
+            caption.sourceBlock.pdfFigureProposal = proposal;
+            for (const child of descriptions) child.pdfPanelDescription = true;
+            continue;
+        }
+        if (captionChildren(destination).length) continue;
         plans.push({ caption, destination, group: [destination], copies: [], match: null,
             texts: [{ block: caption.sourceBlock, caption }], regional: true, ordinary: true });
     }
     return { plans, reserved };
+}
+
+// A lettered description is weaker than a native caption: it only proposes
+// ownership, which the PDF image container must prove before any text moves.
+function regionalPanelDescriptions(float, caption) {
+    const box = visualBodyBox(float);
+    const children = captionChildren(float);
+    const expected = panelLetters(caption.text);
+    if (!box || !children.length || !captionSide(caption.bbox, box)
+        || expected.size < 2) return null;
+    const letters = new Set();
+    for (const child of children) {
+        const text = captionText(child).normalize('NFKC');
+        const match = /^\(\s*([a-z])\s*\)\s+(\S[\s\S]*)$/iu.exec(text);
+        if (!match || text.length > FIGURE_LIMITS.ownedCaptionTextCodePoints
+            || inlineCaption(match[2]) || !validBox(child.bbox)) return null;
+        const letter = match[1].toLowerCase();
+        // Legends can mention panels in prose as well as parentheses, such as
+        // "(A) ... (B) ... (eg, E or F)". Require a named range or letter token.
+        if (letters.has(letter) || !expected.has(letter) && !new RegExp(`\\b${letter}\\b`, 'iu').test(caption.text)
+            || child.bbox[0] < box[0] - MAX_LABEL_DESCRIPTION_GAP
+            || child.bbox[2] > box[2] + MAX_LABEL_DESCRIPTION_GAP
+            || child.bbox[1] < box[1] - MAX_LABEL_DESCRIPTION_GAP
+            || child.bbox[3] > box[3] + MAX_LABEL_DESCRIPTION_GAP) return null;
+        letters.add(letter);
+    }
+    return children;
 }
 
 // Build complete components before assigning legends. Caption children are soft

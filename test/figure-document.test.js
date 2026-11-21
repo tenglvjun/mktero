@@ -14,6 +14,7 @@ import { sha256Hex } from '../src/core/sha256.js';
 import { analyzeMarkdownFigureReferences } from '../src/markdown/markdown-figure-references.js';
 import { extractMarkdownAssetOutline } from '../src/markdown/markdown-asset-outline.js';
 import { createTestPNG } from './helpers/figure-fixtures.js';
+import { FIGURE_LIMITS } from '../src/figures/figure-limits.js';
 
 const hash = data => sha256Hex(data, { crypto: webcrypto });
 const CAPTION = 'FIGURE 9 Sensitivity of the estimated response.';
@@ -241,6 +242,9 @@ test('verifies a mixed group with more OCR fragments than logical panels and a b
         assert.equal(request.caption.text, MIXED_CAPTION);
         assert.equal(request.preservePanelBounds, true);
         assert.equal(request.panels.length, 6);
+        assert.deepEqual(request.ownedTextLocations, candidate.ownedTextBlockIds.map(id => ({
+            bbox: input.blocks.find(block => block.id === id).bbox,
+        })));
         return { bbox: MIXED_BOX, captionBBox: request.caption.bbox, rotation: 0,
             crop: { data: createTestPNG(800, 350), mimeType: 'image/png', width: 800, height: 350 } };
     });
@@ -257,6 +261,121 @@ test('verifies a mixed group with more OCR fragments than logical panels and a b
     assert.ok(document.sourceMap.every(entry => isValidSourceMapEntry(entry, document.markdown.length)));
     assert.deepEqual(calls, { recover: 1, close: 1 });
 });
+
+test('rejects missing or malformed owned-text evidence before requesting native recovery', async () => {
+    const { service } = harness(() => null);
+    const { input } = await service.restore(mixedFixture(), { fileData: Uint8Array.of(1), mode: 'plan' });
+    const candidate = resolveFigureCandidates(input).find(value => value.nativeFigure);
+    assert.ok(candidate.ownedTextBlockIds.length);
+    for (const kind of ['missing', 'bbox', 'range', 'page', 'owner', 'duplicate', 'too-many', 'type']) {
+        const bound = structuredClone(input);
+        const proposed = structuredClone(candidate);
+        const owned = bound.blocks.find(block => block.id === proposed.ownedTextBlockIds[0]);
+        if (kind === 'missing') bound.blocks = bound.blocks.filter(block => block !== owned);
+        if (kind === 'bbox') owned.bbox = null;
+        if (kind === 'range') owned.rangeEvidence = 'unresolved';
+        if (kind === 'page') owned.pageIndex++;
+        if (kind === 'owner') owned.pdfFigure = { ...owned.pdfFigure, id: 'another-figure' };
+        if (kind === 'duplicate') proposed.ownedTextBlockIds.push(owned.id);
+        if (kind === 'too-many') proposed.ownedTextBlockIds = Array(FIGURE_LIMITS.maxLayoutBlocks + 1).fill(owned.id);
+        if (kind === 'type') proposed.ownedTextBlockIds = null;
+        assert.equal(documentFigureRequest(bound, proposed, { remaining: 1_000_000 }), null, kind);
+    }
+    const work = input.blocks.length + input.assets.length;
+    assert.equal(documentFigureRequest(input, candidate, { remaining: work }), null,
+        'Preparing owned text positions must also consume comparison budget');
+});
+
+test('checks that the returned crop retains every owned text location', async () => {
+    const { service } = harness(() => null);
+    const { input } = await service.restore(mixedFixture(), { fileData: Uint8Array.of(1), mode: 'plan' });
+    const candidate = resolveFigureCandidates(input).find(value => value.nativeFigure);
+    const owned = input.blocks.find(block => block.id === candidate.ownedTextBlockIds[0]);
+    owned.bbox = [140, 455, 320, 468];
+    const request = documentFigureRequest(input, candidate, { remaining: 1_000_000 });
+    assert.ok(request);
+    assert.notEqual(request.ownedTextLocations[0].bbox, owned.bbox, 'Request geometry must be copied');
+    const result = { bbox: [100, 100, 900, 468], captionBBox: request.caption.bbox, rotation: 0 };
+    const retained = documentFigureCandidate(candidate, request, result, input.pages[0]);
+    assert.ok(retained);
+    const plan = planFigureReplacement(input, { candidate: retained,
+        crop: { data: createTestPNG(), mimeType: 'image/png', width: 8, height: 8 },
+        assetPath: 'generated/figures/owned-text.png' });
+    assert.deepEqual(plan.blueprint.visualBBox, result.bbox);
+    assert.equal(documentFigureCandidate(candidate, request, { ...result, bbox: [100, 100, 900, 466.415] },
+        input.pages[0]), null, 'Even a 1.585 edge error must be inside the actual crop');
+    assert.equal(documentFigureCandidate(candidate, request, { ...result, bbox: MIXED_BOX }, input.pages[0]), null,
+        'Matching image panels cannot authorize dropping an owned description below them');
+    for (const locations of [undefined, null, {}, [{ bbox: null }],
+        Array(FIGURE_LIMITS.maxLayoutBlocks + 1).fill({ bbox: [140, 455, 320, 468] })]) {
+        assert.equal(documentFigureCandidate(candidate, { ...request, ownedTextLocations: locations },
+            result, input.pages[0]), null);
+    }
+});
+
+test('accepts the reported OCR right-edge error only inside the actual transaction bbox', () => {
+    const container = [95.154, 269.531, 904.297, 862.793];
+    const description = [640.336, 829.964, 905.882, 862.069];
+    const captionBBox = [100, 880, 900, 900];
+    const pdfFigure = { id: 'pdf-figure:9', label: 'FIGURE 9', text: CAPTION, bbox: captionBBox };
+    const parts = ['![Panel](images/native.png)', '(F) Response profile.', CAPTION];
+    const markdown = parts.join('\n\n');
+    const page = { pageIndex: 0, rotation: 0, coordinateFrame: 'display-cropbox' };
+    const input = { provider: 'mineru', rangesExplicit: true, markdown, assetBasePath: '', pages: [page],
+        assets: [{ path: 'images/native.png', mimeType: 'image/png', data: createTestPNG() }],
+        blocks: [
+            { id: 'panel', type: 'image', role: 'panel', bbox: container,
+                pdfFigurePart: 'panel', assetPath: 'images/native.png' },
+            { id: 'description', type: 'text', role: 'figure-text', bbox: description,
+                pdfFigurePart: 'text', text: parts[1] },
+            { id: 'caption', type: 'text', role: 'caption', bbox: captionBBox,
+                pdfFigurePart: 'caption', text: CAPTION },
+        ].map((block, sourceOrdinal) => ({ ...block, sourceOrdinal, pageIndex: 0, pdfFigure,
+            rangeEvidence: 'explicit-range', sourceRanges: [{ from: markdown.indexOf(parts[sourceOrdinal]),
+                to: markdown.indexOf(parts[sourceOrdinal]) + parts[sourceOrdinal].length }] })),
+    };
+    const original = { id: 'fig-p0-b0', pageIndex: 0, label: 'FIGURE 9', nativeFigure: true,
+        decision: 'preserve', reason: 'ambiguous-membership', panelBlockIds: ['panel'],
+        ownedTextBlockIds: ['description'], captionBlockIds: ['caption'],
+        captionBBox, visualBBox: container, evidence: ['pdf-caption', 'exact-source-ranges'] };
+    for (const preservePanelBounds of [false, true]) {
+        const proposed = { ...original, preservePanelBounds };
+        const request = documentFigureRequest(input, proposed, { remaining: 1_000_000 });
+        assert.ok(request);
+        const result = { bbox: [95.154, 269.531, 905.882, 862.793], captionBBox, rotation: 0 };
+        assert.equal(documentFigureCandidate(proposed, request, { ...result, bbox: container }, page), null,
+            'The native container alone still leaves the OCR description out of bounds');
+        const candidate = documentFigureCandidate(proposed, request, result, page);
+        assert.ok(candidate);
+        const blueprint = { candidate, assetPath: 'generated/figures/edge.png',
+            crop: { data: createTestPNG(), mimeType: 'image/png', width: 8, height: 8 } };
+        const plan = planFigureReplacement(input, blueprint);
+        assert.deepEqual(plan.blueprint.visualBBox, result.bbox);
+        assert.ok(plan.blueprint.memberBlockIds.includes('description'));
+        assert.throws(() => planFigureReplacement(input, { ...blueprint,
+            candidate: { ...candidate, visualBBox: container } }), error => (
+            error.preserveReason === 'foreign-content-overlap'
+        ));
+    }
+});
+
+for (const bbox of [[140, 455, 320, 468], [640.336, 417.895, 901.585, 450]]) {
+    test(`keeps all OCR fragments when the returned crop omits owned text at ${bbox}`, async () => {
+        const input = mixedFixture();
+        input.blocks.find(block => block.pdfFigurePart === 'text').bbox = bbox;
+        const before = structuredClone(input);
+        const { service } = harness(request => ({ bbox: MIXED_BOX, captionBBox: request.caption.bbox, rotation: 0,
+            crop: { data: createTestPNG(800, 350), mimeType: 'image/png', width: 800, height: 350 } }));
+        const draft = await service.restore(input, { fileData: Uint8Array.of(1) });
+        assert.equal(draft.blueprints.length, 0);
+        const document = await finalizeRestoredDocument(input, draft, { prepare: prepareMinerUResult, hash });
+        assert.equal(document.markdown, input.markdown);
+        assert.ok(document.markdown.includes(FRAGMENT));
+        assert.ok(document.markdown.includes(REAL_TABLE));
+        assert.ok(document.markdown.includes('images/e3.png'));
+        assert.deepEqual(input, before);
+    });
+}
 
 for (const kind of ['missing', 'failure', 'trimmed-vector-edge', 'intervening-prose']) {
     test(`keeps every mixed fragment and the embedded caption after ${kind}`, async () => {
