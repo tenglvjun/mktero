@@ -7116,7 +7116,6 @@ class MarkdownTabView {
         }
         const documentVisible = this.documentActionsOpen;
         const exportVisible = this.exportActionsOpen;
-        if (!documentVisible) this.setReaderFontOptionsOpen(false);
         this.elements.actionToggle.setAttribute(
             'aria-expanded',
             String(documentVisible)

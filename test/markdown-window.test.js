@@ -4639,6 +4639,70 @@ test('selects a font from the top toolbar without opening document actions', () 
     }
 });
 
+for (const translated of [false, true]) {
+    test(`keeps ${translated ? 'translated' : 'original'} font options open through window press capture`, () => {
+        const persistedFonts = [];
+        const { document, view, shadow } = createView(createModel({
+            status: 'ready',
+            progress: 100,
+            markdown: '# Paper\n\nReadable text.',
+            sourceKind: 'markdown',
+            ...(translated ? {
+                translationStatus: 'ready',
+                translationView: 'translated',
+                translationTargetLanguage: 'zh-CN',
+                translatedMarkdown: '# 论文',
+            } : {}),
+        }), {}, {
+            onReaderFontChange: font => persistedFonts.push(font),
+        });
+
+        try {
+            const trigger = shadow.querySelector('#mktero-reader-font-family');
+            const listbox = shadow.querySelector('#mktero-reader-font-options');
+            const typography = shadow.querySelector('.markdown-typography');
+            const font = translated ? 'songti-sc' : 'georgia';
+            const option = listbox.querySelector(`[data-reader-font="${font}"]`);
+            const label = option.querySelector('.markdown-reader-font-option-label');
+            const path = [];
+            for (let node = label; node; node = node.parentNode) path.push(node);
+            path.push(view.host, document, document.defaultView);
+
+            trigger.click();
+            for (const type of ['pointerdown', 'mousedown']) {
+                const event = new document.defaultView.Event(type, {
+                    bubbles: true,
+                    composed: true,
+                });
+                // Linkedom does not propagate a composed event out of a shadow
+                // root. Deliver its path to the window's capture listener.
+                Object.defineProperty(event, 'composedPath', {
+                    value: () => path,
+                });
+                document.dispatchEvent(event);
+                assert.equal(listbox.hidden, false, `${type} hid the font options`);
+                assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+                assert.equal(typography.classList.contains('is-open'), true);
+            }
+            label.click();
+
+            assert.equal(option.getAttribute('aria-selected'), 'true');
+            assert.equal(listbox.hidden, true);
+            assert.equal(typography.classList.contains('is-open'), true);
+            assert.deepEqual(persistedFonts, translated ? [] : ['georgia']);
+            assert.match(
+                view.host.style.getPropertyValue(translated
+                    ? '--reader-selected-translation-font'
+                    : '--reader-font'),
+                translated ? /^"Songti SC"/ : /^Georgia,/
+            );
+        }
+        finally {
+            view.destroy();
+        }
+    });
+}
+
 test('offers fonts for the current language only in translated mode', () => {
     const persistedFonts = [];
     const translatedModel = createModel({
