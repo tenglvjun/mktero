@@ -238,8 +238,10 @@ function planVisualCaptionGroups(captions, floats, pageBlocks, lines) {
     // Once an interior annotation exposes a displaced legend, its source
     // component must validate too. Do not let the weaker single-row fallback
     // apply half of a rejected repair to either component.
-    const rejected = entries.filter(entry => (entry.internal.length || entry.panelMoves?.length)
-        && !accepted.includes(entry));
+    const rejected = entries.filter(entry => !accepted.includes(entry)
+        && (entry.internal.length || entry.panelMoves?.length
+            || entry.group.some(float => captionChildren(float).some(child => panelLetter(child)
+                && (entry.valid === false || !labelInsidePanel(child.bbox, visualBodyBox(float)))))));
     const withheld = groups.filter(group => rejected.some(entry => group.some(float =>
         entry.group.includes(float) || captionChildren(float).some(child => sameCaption(child, entry.caption)))));
     const withheldFloats = withheld.flat();
@@ -264,20 +266,28 @@ function sharedVisualCaptionGroups(groups, captions, floats, pageBlocks, lines) 
         if (group.length < 2 || owners.length !== 1) continue;
         const caption = owners[0];
         if (!panelLetters(caption.text).size && hasCloserVisualOwner(caption, group, groups)) continue;
-        if (!closedVisualGroup(group, box, caption, floats, pageBlocks, captions)) continue;
         const internal = group.flatMap(captionChildren).filter(child => group.some(float =>
             interiorCaption(child, visualBodyBox(float), lines)));
+        const expected = panelLetters(caption.text);
         const panelMoves = [];
         for (const source of group) {
             for (const child of captionChildren(source)) {
-                if (!panelLetter(child) || labelInsidePanel(child.bbox, visualBodyBox(source))) continue;
-                const owners = group.filter(float => labelNearPanel(child.bbox, visualBodyBox(float)));
-                if (owners.length === 1 && nativeInteriorText(child, lines)) {
-                    panelMoves.push({ source, target: owners[0], child });
-                }
+                const letter = panelLetter(child);
+                if (!letter || labelInsidePanel(child.bbox, visualBodyBox(source))) continue;
+                if (!expected.has(letter) || !smallPanelLabel(child.bbox)) continue;
+                const owners = floats.filter(float => labelNearPanel(child.bbox, visualBodyBox(float)));
+                if (owners.length !== 1 || !group.includes(owners[0])) continue;
+                // Tight OCR crops omit raster panel letters above the axes.
+                // Keep a uniquely located letter with its existing panel;
+                // moving it to a different panel still needs native text.
+                if (owners[0] === source) internal.push(child);
+                else if (nativeInteriorText(child, lines)) panelMoves.push({ source, target: owners[0], child });
             }
         }
-        entries.push({ group, caption, internal, panelMoves });
+        const visualBox = unionOf([box, ...internal.map(child => child.bbox),
+            ...panelMoves.map(move => move.child.bbox)]);
+        const valid = closedVisualGroup(group, visualBox, caption, floats, pageBlocks, captions);
+        entries.push({ group, caption, internal, panelMoves, valid });
     }
     return entries.filter(entry => entries.filter(other => other.caption === entry.caption).length === 1);
 }
@@ -324,7 +334,8 @@ function addInteriorCaptionGroups(entries, groups, captions, floats, pageBlocks,
 function validateVisualCaptionGroups(entries, floats) {
     // Every displaced caption must have a validated destination in the same
     // plan. Reject dependent repairs together, without touching the IR.
-    let accepted = entries.filter(entry => entries.filter(other => other.caption === entry.caption).length === 1);
+    let accepted = entries.filter(entry => entry.valid !== false
+        && entries.filter(other => other.caption === entry.caption).length === 1);
     let changed = true;
     while (changed) {
         const next = accepted.filter(entry => entry.group.every(float => captionChildren(float).every(child =>
@@ -470,6 +481,11 @@ function interiorCaption(child, box, lines) {
     return nativeInteriorText(child, lines);
 }
 
+function smallPanelLabel(box) {
+    const edge = 2 * (FIGURE_LIMITS.ownedTextPadding + EDGE_TOLERANCE);
+    return validBox(box) && box[2] - box[0] <= edge && box[3] - box[1] <= edge;
+}
+
 function labelNearPanel(label, panel) {
     if (!validBox(label) || !validBox(panel)) return false;
     const padding = FIGURE_LIMITS.ownedTextPadding;
@@ -547,6 +563,7 @@ function planIndependentCaptions(captions, floats, pageBlocks) {
 function applyPlan(ir, plan, report) {
     for (const { source, target, child } of plan.panelMoves || []) {
         child.pdfPanelLabel = true;
+        if (plan.ordinary) child.kind = 'figure-text';
         if (source === target) continue;
         source.children = source.children.filter(member => member !== child);
         target.children.push(child);

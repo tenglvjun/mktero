@@ -65,6 +65,14 @@ covers. A complete legend anchored on any one fragment of a closed component
 belongs to the whole component, so a second fragment of the same row is not
 left behind as an uncaptioned figure.
 
+A panel letter already attached to its own subplot may sit just above or
+outside the tight image box. When the complete shared caption agrees with the
+PDF text, the picture component is closed, and a bounded position check gives
+the letter one owner, Mktero keeps it in the crop at its original position.
+Raster letters need no separate PDF text item for this check. Moving a letter
+to another subplot still requires native text evidence. A conflicting letter
+or owner keeps the component intact; a fallback cannot repair only part of it.
+
 A chart footer reported as a caption (an axis note printed inside the plot) is
 not a legend. Mktero confirms it against the PDF's own text at that place and
 keeps it as figure text: it leaves the reading flow only after a successful
