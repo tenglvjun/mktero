@@ -506,14 +506,16 @@ test('keeps rendered display math spacing inside the CodeMirror block widget', (
     assert.match(taggedMath, /position:\s*relative/);
     assert.match(taggedMath, /width:\s*100%/);
 
-    const taggedMathML = ruleBody(
-        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math'
-    );
+    const taggedMathML = ruleBody([
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math,',
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-native-tagged math',
+    ].join('\n'));
     assert.match(taggedMathML, /width:\s*100%/);
 
-    const taggedTable = ruleBody(
-        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math > semantics > mtable'
-    );
+    const taggedTable = ruleBody([
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-tagged math > semantics > mtable,',
+        '.markdown-editor-host > .cm-editor .cm-mktero-math-display .math.math-display-native-tagged math > semantics > mtable',
+    ].join('\n'));
     assert.match(taggedTable, /width:\s*100%/);
 
     const equationNumber = ruleBody(

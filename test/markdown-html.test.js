@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { parseHTML } from 'linkedom';
 import { translateMessage } from '../src/i18n/localization.js';
 import {
     findInlineMathMatches,
@@ -81,10 +82,10 @@ test('renders display LaTeX fractions as block MathML', () => {
 test('renders one EPUB equation number when OCR repeats an identical adjacent tag', () => {
     const markdown = '$$x^2 + y^2 = z^2 \\tag{3}\\tag{3}$$';
     const html = renderMarkdownHTML(markdown, { target: 'epub' });
-    assert.doesNotMatch(html, /katex-error/u);
+    assert.doesNotMatch(html, /katex-error|math-fallback/u);
     assert.equal((html.match(/<mtext>\(3\)<\/mtext>/gu) || []).length, 1);
-    assert.match(renderMarkdownHTML(markdown), /katex-error/u);
-    assert.match(renderMarkdownHTML('$$x^2 \\tag{3}\\tag{4}$$', { target: 'epub' }), /katex-error/u);
+    assert.match(renderMarkdownHTML(markdown), /math-fallback/u);
+    assert.match(renderMarkdownHTML('$$x^2 \\tag{3}\\tag{4}$$', { target: 'epub' }), /math-fallback/u);
 });
 
 test('marks tagged display formulas so the equation number can align independently', () => {
@@ -99,6 +100,103 @@ test('marks tagged display formulas so the equation number can align independent
 
     const untagged = renderMarkdownHTML('$$\nx^2 + y^2 = z^2\n$$');
     assert.doesNotMatch(untagged, /math-display-tagged/);
+});
+
+test('aligns a complete unparenthesized tag independently', () => {
+    const { document } = parseHTML(renderMarkdownHTML('$$x \\tag*{S.1}$$'));
+
+    assert.equal(document.querySelector('.math-display-equation-number')?.textContent, 'S.1');
+    assert.equal(document.querySelector('math > semantics > mtable > mtr > mtd:last-child')?.textContent, 'S.1');
+    assert.equal(document.querySelector('.math-fallback'), null);
+});
+
+test('keeps all of a nested plain-text tag when aligning it independently', () => {
+    const { document } = parseHTML(renderMarkdownHTML(
+        '$$x \\tag{\\text{A {nested} label}}$$'
+    ));
+
+    assert.equal(
+        document.querySelector('.math-display-equation-number')?.textContent.replace(/\s/gu, ' '),
+        '(A nested label)'
+    );
+    assert.equal(document.querySelector('.math-fallback'), null);
+});
+
+for (const example of [
+    {
+        name: 'mathematics within a parenthesized tag',
+        source: String.raw`x \tag{\(l(I(t))\),}`,
+        text: '(l(I(t)),)',
+        letters: ['l', 'I', 't'],
+    },
+    {
+        name: 'mathematics within an unparenthesized tag after body text',
+        source: String.raw`\text{body} x \tag*{\(a+b\)}`,
+        text: 'a+b',
+        letters: ['a', 'b'],
+    },
+    {
+        name: 'a nested matrix within a tag',
+        source: String.raw`x \tag{\(\begin{smallmatrix}a&b\\c&d\end{smallmatrix}\)}`,
+        text: '(abcd)',
+        letters: ['a', 'b', 'c', 'd'],
+    },
+    {
+        name: 'styled text within a parenthesized tag',
+        source: String.raw`x \tag{\textbf{A}}`,
+        text: '(A)',
+        styledText: 'A',
+    },
+    {
+        name: 'nested styled text within an unparenthesized tag',
+        source: String.raw`x \tag*{\text{outer {\textbf{inner}} label}}`,
+        text: 'outer inner label',
+        styledText: 'inner',
+    },
+]) {
+    test(`keeps ${example.name} visible as complete MathML`, () => {
+        for (const target of ['mktero', 'epub']) {
+            const { document } = parseHTML(renderMarkdownHTML(`$$${example.source}$$`, { target }));
+            const tag = document.querySelector('math > semantics > mtable > mtr > mtd:last-child');
+
+            assert.ok(document.querySelector('.math-display-native-tagged'), target);
+            assert.equal(tag?.textContent.replace(/\s/gu, ' '), example.text, target);
+            assert.equal(document.querySelector('.math-display-equation-number'), null, target);
+            assert.equal(document.querySelector('.math-fallback, .katex-error'), null, target);
+            if (example.letters) {
+                assert.deepEqual([...tag.querySelectorAll('mi')].map(node => node.textContent), example.letters, target);
+            }
+            if (example.styledText) {
+                assert.equal(tag.querySelector('[mathvariant="bold"]')?.textContent, example.styledText, target);
+            }
+        }
+        const { document } = parseHTML(renderMarkdownHTML(`$$${example.source}$$`, { target: 'zotero-note' }));
+        assert.equal(document.querySelector('pre.math')?.textContent, `$$${example.source}$$`);
+        assert.equal(document.querySelector('.math-fallback'), null);
+    });
+}
+
+test('keeps markup inside plain-text and mathematical tags inert', () => {
+    for (const example of [
+        {
+            source: String.raw`x \tag{\text{<img src=x onerror=alert(1)>}}`,
+            text: '(<img src=x onerror=alert(1)>)',
+        },
+        {
+            source: String.raw`x \tag{\(\text{<img src=x onerror=alert(1)>}+y\)}`,
+            text: '(<img src=x onerror=alert(1)>+y)',
+        },
+    ]) {
+        const { document } = parseHTML(renderMarkdownHTML(`$$${example.source}$$`));
+        const tag = document.querySelector('math > semantics > mtable > mtr > mtd:last-child');
+        const alignedTag = document.querySelector('.math-display-equation-number');
+
+        assert.equal(tag?.textContent.replace(/\s/gu, ' '), example.text);
+        if (alignedTag) {
+            assert.equal(alignedTag.textContent.replace(/\s/gu, ' '), example.text);
+        }
+        assert.equal(document.querySelector('img, script, [onerror], .math-fallback, .katex-error'), null);
+    }
 });
 
 test('splits display LaTeX from following Markdown without a blank line', () => {
@@ -216,8 +314,25 @@ test('falls back without invoking KaTeX for an oversized formula', () => {
 test('keeps invalid LaTeX visible without failing Markdown rendering', () => {
     const html = renderMarkdownHTML('Bad $\\frac{$ formula');
 
-    assert.match(html, /class="katex-error"/);
+    assert.match(html, /class="math-fallback"/);
+    assert.doesNotMatch(html, /katex-error/);
     assert.match(html, /\\frac\{/);
+});
+
+test('keeps malformed and conflicting tags as escaped source for every render target', () => {
+    for (const source of [
+        String.raw`x \tag{\(l(I(t))\}`,
+        String.raw`x \tag{3}\tag{4}`,
+        String.raw`x \tag{\(<img src=x onerror=alert(1)>\}`,
+    ]) {
+        for (const target of ['mktero', 'epub', 'zotero-note']) {
+            const { document } = parseHTML(renderMarkdownHTML(`Before.\n\n$$${source}$$\n\nAfter.`, { target }));
+
+            assert.equal(document.querySelector('.math-fallback')?.textContent, source, target);
+            assert.equal(document.querySelector('math, .katex-error, .math-display-equation-number, img, [onerror]'), null, target);
+            assert.deepEqual([...document.querySelectorAll('p')].map(node => node.textContent), ['Before.', 'After.'], target);
+        }
+    }
 });
 
 test('does not let currency text consume a later formula delimiter', () => {

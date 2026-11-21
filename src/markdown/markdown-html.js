@@ -1544,7 +1544,7 @@ function renderMathML(source, displayMode, options = {}) {
     return katex.renderToString(source, {
         displayMode,
         output: 'mathml',
-        throwOnError: false,
+        throwOnError: true,
         strict: 'ignore',
         trust: false,
         maxExpand: 100,
@@ -1554,11 +1554,8 @@ function renderMathML(source, displayMode, options = {}) {
 }
 
 function renderZoteroNoteMath(source, displayMode) {
-    const bounded = renderMathML(source, displayMode, {
-        throwOnError: true,
-    });
+    const bounded = renderMathML(source, displayMode);
     const unbounded = renderMathML(source, displayMode, {
-        throwOnError: true,
         maxSize: Infinity,
     });
     if (bounded !== unbounded) return null;
@@ -1618,15 +1615,21 @@ function wrapMkteroMath(rendered, displayMode, hasEquationTag = false) {
     const equationNumber = hasEquationTag
         ? renderedEquationNumberMarkup(rendered)
         : '';
-    const tagClass = equationNumber ? ' math-display-tagged' : '';
+    const tagClass = equationNumber
+        ? ' math-display-tagged'
+        : hasEquationTag ? ' math-display-native-tagged' : '';
     return `<div class="math math-display${tagClass}">${rendered}${equationNumber}</div>`;
 }
 
 function renderedEquationNumberMarkup(rendered) {
-    const matches = [
-        ...rendered.matchAll(/<mtext(?:\s[^>]*)?>([^<]*)<\/mtext>/g),
-    ];
-    const match = matches.at(-1);
+    // Only copy a complete plain-text tag cell from KaTeX's outer tag table.
+    // Mathematical or styled tags keep their native MathML cell visible.
+    if (!rendered.includes('<semantics><mtable width="100%"><mtr><mtd width="50%"></mtd><mtd>')) {
+        return '';
+    }
+    const match = rendered.match(
+        /<mtd><mtext>([^<]*)<\/mtext><\/mtd><\/mtr><\/mtable><annotation\b/u
+    );
     if (!match) return '';
     return `<span class="math-display-equation-number">${match[1]}</span>`;
 }
@@ -1656,7 +1659,7 @@ function normalizeOcrMathSource(source) {
 function repairOcrMathCommands(source) {
     // MinerU occasionally glues a trailing spacing command onto \end (for
     // example "\qquad\end{array}" becomes "\qend{array}"). KaTeX then rejects
-    // the whole environment and paints the raw source red.
+    // the whole environment, so restore the missing command boundary.
     const withEnd = source.replace(/\\(?:q{1,3})end(?=\s*\{)/gu, '\\end');
     // OCR sometimes drops the \mathbf group and leaves an orphaned accent
     // command where a bold letter was typeset (for example "|\u}" for
