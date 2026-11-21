@@ -7,7 +7,8 @@ import {
 import { normalizePdfAnnotationText } from '../../markdown/pdf-annotation-text.js';
 import { BLOCK_KIND, BLOCK_ROLE, blockPlainText, fragmentText } from './ir.js';
 import { pdfLines, pdfTextItemsByPage } from './pdf-geometry.js';
-import { readPDFCaptionRegions } from './caption-regions.js';
+import { nativeLineText, readPDFCaptionRegions } from './caption-regions.js';
+import { protectedFloatNotes } from './floats.js';
 
 // MinerU's layout sometimes loses a figure's number, or files the legend of
 // one float under a different float. The PDF's own text layer still has it, so
@@ -78,15 +79,24 @@ export function restorePDFFigureCaptions(ir, pdfText) {
         // copy search are estimated up front, and a page whose evidence would
         // cost more than the pipeline allows is left exactly as MinerU wrote
         // it. A hostile page therefore cannot make the pass quadratic.
-        const lines = captionLines(pdfLines(items));
+        const nativeLines = pdfLines(items);
         const blockCount = pageBlocks.reduce((count, block) => count + 1 + (block.children?.length || 0), 0);
-        if (!withinBudget(lines.length, floats.length, blockCount)) {
+        // Column boundaries, displaced annotations and the newly exposed
+        // crop band each inspect native items against bounded layout pieces.
+        const columnWork = 3 * items.length * blockCount;
+        if (!withinBudget(nativeLines.length, floats.length, blockCount, floats.length, columnWork)) {
+            report.skipped++;
+            continue;
+        }
+        const lines = captionLines(nativeLines, pageBlocks);
+        if (!withinBudget(lines.length, floats.length, blockCount, floats.length, columnWork)) {
             report.skipped++;
             continue;
         }
         const regions = readPDFCaptionRegions(page, items, pageBlocks, {
             parseCaption: inlineCaption,
-            maxWork: FIGURE_LIMITS.maxComparisons - captionWork(lines.length, floats.length, blockCount),
+            maxWork: FIGURE_LIMITS.maxComparisons - columnWork
+                - captionWork(lines.length, floats.length, blockCount),
         });
         if (regions.exhausted) {
             report.skipped++;
@@ -97,20 +107,21 @@ export function restorePDFFigureCaptions(ir, pdfText) {
             ...findNativeCaptions(page, lines, pageBlocks).filter(outsideRegions),
             ...regions.regions.map(region => region.caption).filter(Boolean),
         ].filter(caption => !shortensOCRCaption(caption, floats));
-        if (!withinBudget(lines.length, floats.length, blockCount, captions.length, regions.work)) {
+        const work = columnWork + regions.work;
+        if (!withinBudget(lines.length, floats.length, blockCount, captions.length, work)) {
             report.skipped++;
             continue;
         }
         const mixedCaptions = floats.some(float => float.kind === BLOCK_KIND.TABLE)
             && floats.some(float => float.kind === BLOCK_KIND.IMAGE || float.kind === BLOCK_KIND.CHART)
-            && withinBudget(lines.length * 2, floats.length * 2, blockCount * 2, floats.length, regions.work)
+            && withinBudget(lines.length * 2, floats.length * 2, blockCount * 2, floats.length, work)
             ? findNativeCaptions(page, lines, pageBlocks, { corroborateOCR: true })
                 .filter(outsideRegions).filter(caption => !shortensOCRCaption(caption, floats)) : [];
         if (!captions.length && !mixedCaptions.length) continue;
         const ordinary = planVisualCaptionGroups(captions.filter(caption => !caption.sourceBlock), floats, pageBlocks, lines);
         // A neighbouring uncaptioned table must not turn a resolved chart group
         // into a tentative mixed group that might fail PDF verification.
-        if (withinBudget(lines.length, floats.length, blockCount, captions.length + mixedCaptions.length, regions.work)) {
+        if (withinBudget(lines.length, floats.length, blockCount, captions.length + mixedCaptions.length, work)) {
             proposeMixedFigureGroups(mixedCaptions, floats, pageBlocks, ordinary.floats);
         }
         const proposed = floats.map(float => float.pdfFigureProposal).filter(Boolean);
@@ -136,6 +147,7 @@ function captionWork(lineCount, floatCount, blockCount, captionCount = floatCoun
     return pairs * pairs // pairing, rival search and the copy scan
         + pairs * blockCount * (captionCount + floatCount) // group, child-caption and prose scans
         + floatCount * floatCount * (captionCount + blockCount) // complete visual components and boundaries
+        + blockCount * (lineCount + floatCount + blockCount) // original footnote ownership and conflicts
         + blockCount * lineCount // native text checks for interior annotations
         + lineCount * lineCount; // column measure and following lines
 }
@@ -235,6 +247,7 @@ function planVisualCaptionGroups(captions, floats, pageBlocks, lines) {
     const entries = sharedVisualCaptionGroups(groups, captions, floats, pageBlocks, lines);
     addInteriorCaptionGroups(entries, groups, captions, floats, pageBlocks, lines);
     const accepted = validateVisualCaptionGroups(entries, floats);
+    planFloatAnnotations(accepted, captions, floats, pageBlocks, lines);
     // Once an interior annotation exposes a displaced legend, its source
     // component must validate too. Do not let the weaker single-row fallback
     // apply half of a rejected repair to either component.
@@ -352,7 +365,59 @@ function validateVisualCaptionGroups(entries, floats) {
     return accepted;
 }
 
-function ordinaryCaptionPlan({ group, caption, internal, panelMoves = [] }, floats, pageBlocks) {
+// An original float footnote can be a clipped picture title. Proximity alone
+// never moves it: its complete native reading must agree, exactly one body
+// (including the original table) may contain it, and the whole numbered
+// figure must already have passed the ordinary shared-caption checks.
+function planFloatAnnotations(entries, captions, floats, pageBlocks, lines) {
+    if (!entries.length) return;
+    const proposed = new Map(entries.map(entry => [entry, []]));
+    for (const source of floats) {
+        const protectedNotes = protectedFloatNotes(source);
+        for (const child of source.children) {
+            if (child.kind !== 'footnote' || child.role === BLOCK_ROLE.CHROME || protectedNotes.has(child)
+                || child.originalFootnote?.ownerId !== source.id
+                || child.originalFootnote.ownerKind !== source.kind || child.pageIndex !== source.pageIndex
+                || child.fragments?.length !== 1 || child.fragments[0].pageIndex !== child.pageIndex
+                || !validBox(child.bbox)) continue;
+            const owners = floats.filter(float => labelNearPanel(child.bbox, visualBodyBox(float)));
+            if (owners.length !== 1 || owners[0] === source || owners[0].kind === BLOCK_KIND.TABLE) continue;
+            const target = owners[0];
+            const choices = entries.filter(entry => entry.group.includes(target));
+            if (choices.length !== 1 || !interiorCaption(child, visualBodyBox(target), lines)) continue;
+            proposed.get(choices[0]).push({ source, target, child });
+        }
+    }
+    for (const [entry, moves] of proposed) {
+        if (!moves.length || moves.some((move, index) => moves.slice(index + 1)
+            .some(other => intersectionArea(move.child.bbox, other.child.bbox) > 0))) continue;
+        const baseBox = unionOf([...entry.group.map(visualBodyBox),
+            ...entry.internal.map(child => child.bbox), ...(entry.panelMoves || []).map(move => move.child.bbox)]);
+        const box = unionOf([baseBox, ...moves.map(move => move.child.bbox)]);
+        if (intersectionArea(box, entry.caption.bbox) > 0
+            || !closedVisualGroup(entry.group, box, entry.caption, floats, pageBlocks, captions)) continue;
+        // A different float's real caption or footnote is still independent
+        // content even when its parent box only describes the table body.
+        const claimed = new Set(moves.map(move => move.child));
+        if (floats.some(float => !entry.group.includes(float) && float.children.some(child =>
+            child.kind !== 'body' && !claimed.has(child) && validBox(child.bbox)
+            && intersectionArea(box, child.bbox) > 0))) continue;
+        if (!annotationBandClear(box, baseBox, moves, lines)) continue;
+        entry.annotationMoves = moves;
+    }
+}
+
+function annotationBandClear(box, baseBox, moves, lines) {
+    return lines.every(({ line }) => line.items.every(item =>
+        intersectionArea(box, item.bbox) === 0 || labelInsidePanel(item.bbox, baseBox)
+        || moves.some(move => {
+            const note = move.child.bbox;
+            return labelInsidePanel(item.bbox, [note[0] - EDGE_TOLERANCE, note[1] - EDGE_TOLERANCE,
+                note[2] + EDGE_TOLERANCE, note[3] + EDGE_TOLERANCE]);
+        })));
+}
+
+function ordinaryCaptionPlan({ group, caption, internal, panelMoves = [], annotationMoves = [] }, floats, pageBlocks) {
     const complete = group.find(float => captionChildren(float).some(child =>
         completesCaption(child, caption) && coversCaption(captionText(child), caption.text)));
     const destination = complete || [...group].sort((left, right) =>
@@ -361,9 +426,10 @@ function ordinaryCaptionPlan({ group, caption, internal, panelMoves = [] }, floa
     const match = captionChildren(destination).find(child => completesCaption(child, caption)) || null;
     const copies = captionCopies(floats, caption, match, new Set());
     const texts = textCopies(pageBlocks, caption, group);
-    if (!internal.length && !panelMoves.length && match && coversCaption(captionText(match), caption.text)
+    if (!internal.length && !panelMoves.length && !annotationMoves.length
+        && match && coversCaption(captionText(match), caption.text)
         && !copies.length && !texts.length) return null;
-    return { caption, group, destination, match, copies, texts, internal, panelMoves, ordinary: true };
+    return { caption, group, destination, match, copies, texts, internal, panelMoves, annotationMoves, ordinary: true };
 }
 
 // Unlike the ordinary region path, this proposal may include OCR tables. It
@@ -475,9 +541,9 @@ function interiorCaption(child, box, lines) {
     if (!validBox(child.bbox) || !text || [...text].length > FIGURE_LIMITS.ownedTextCodePoints
         || parseAcademicFigureCaption(text) || parseAcademicTableCaption(text) || LABEL_ONLY.test(text)
         || panelLetter(child)) return false;
-    if (child.bbox[0] < box[0] - FIGURE_LIMITS.ownedTextPadding
-        || child.bbox[2] > box[2] + FIGURE_LIMITS.ownedTextPadding
-        || child.bbox[1] < box[1] || child.bbox[3] > box[3] + FIGURE_LIMITS.ownedTextPadding) return false;
+    const padding = FIGURE_LIMITS.ownedTextPadding;
+    if (child.bbox[0] < box[0] - padding || child.bbox[2] > box[2] + padding
+        || child.bbox[1] < box[1] - padding || child.bbox[3] > box[3] + padding) return false;
     return nativeInteriorText(child, lines);
 }
 
@@ -496,16 +562,22 @@ function labelNearPanel(label, panel) {
 function nativeInteriorText(child, lines) {
     // Several axes can share one PDF baseline. Compare only the native runs
     // at this child's location, not the text of the whole printed row.
-    return lines.some(({ line }) => {
+    let matched = false;
+    for (const { line } of lines) {
         const items = line.items.filter(item => {
             const x = (item.bbox[0] + item.bbox[2]) / 2;
             const y = (item.bbox[1] + item.bbox[3]) / 2;
             return x >= child.bbox[0] - EDGE_TOLERANCE && x <= child.bbox[2] + EDGE_TOLERANCE
                 && y >= child.bbox[1] - EDGE_TOLERANCE && y <= child.bbox[3] + EDGE_TOLERANCE;
         });
-        return items.length && normalize(lineText({ items })) === normalize(captionText(child))
-            && boxMatches(child.bbox, unionOf(items.map(item => item.bbox)));
-    });
+        if (!items.length) continue;
+        // One matching row cannot hide another row inside the same proposed
+        // title. Every local glyph must belong to the complete short reading.
+        if (matched || normalize(nativeLineText(items)) !== normalize(captionText(child))
+            || !boxMatches(child.bbox, unionOf(items.map(item => item.bbox)))) return false;
+        matched = true;
+    }
+    return matched;
 }
 
 function planIndependentCaptions(captions, floats, pageBlocks) {
@@ -561,6 +633,14 @@ function planIndependentCaptions(captions, floats, pageBlocks) {
 }
 
 function applyPlan(ir, plan, report) {
+    for (const { source, target, child } of plan.annotationMoves || []) {
+        source.children = source.children.filter(member => member !== child);
+        child.kind = 'figure-text';
+        target.children.push(child);
+        const moves = ir.captionMoves || (ir.captionMoves = []);
+        moves.push({ from: source.id, to: target.id, ids: [child.id], pageIndex: child.pageIndex,
+            reason: 'figure-annotation' });
+    }
     for (const { source, target, child } of plan.panelMoves || []) {
         child.pdfPanelLabel = true;
         if (plan.ordinary) child.kind = 'figure-text';
@@ -838,14 +918,14 @@ function nextLineInColumn(lines, index) {
 
 // Every printed line of the page, split into its column runs, with the run's
 // own text and box. Continuation lines are looked up in this same list.
-function captionLines(lines) {
+function captionLines(lines, pageBlocks = []) {
+    const regions = pageBlocks.flatMap(block => [
+        ...(isProse(block) && !LABEL_ONLY.test(blockPlainText(block).trim()) ? [block] : []),
+        ...captionChildren(block).filter(child => inlineCaption(captionText(child))),
+    ]).filter(block => validBox(block.bbox));
     const output = [];
     for (const line of lines) {
-        const runs = columnRuns(line);
-        if (!runs) {
-            output.push({ line, text: lineText(line) });
-            continue;
-        }
+        const runs = columnRuns(line, regions) || [{ items: line.items, left: line.left, right: line.right }];
         for (const run of runs) {
             const text = run.items.map(item => item.text).filter(Boolean).join(' ').replace(/\s+/gu, ' ').trim();
             if (!text) continue;
@@ -853,14 +933,16 @@ function captionLines(lines) {
             // from its own items.
             const boxes = run.items.map(item => item.bbox);
             output.push({
-                line: { ...line, items: run.items, left: run.left, right: run.right,
+                line: { items: run.items, left: run.left, right: run.right,
+                    bottom: Math.max(...boxes.map(box => box[3])),
+                    height: Math.max(...boxes.map(box => box[3] - box[1])),
                     bbox: [run.left, Math.min(...boxes.map(box => box[1])),
                         run.right, Math.max(...boxes.map(box => box[3]))] },
                 text,
             });
         }
     }
-    return output;
+    return output.sort((left, right) => left.line.bottom - right.line.bottom || left.line.left - right.line.left);
 }
 
 function nativeCaption(page, ordinal, labeled, parts) {
@@ -885,16 +967,17 @@ function lineText(line) {
     return (line.items || []).map(item => item.text).filter(Boolean).join(' ').replace(/\s+/gu, ' ').trim();
 }
 
-// A printed line can hold two columns when the gap between them is small; the
-// caption is the left run, and the right run is the neighbouring column's
-// prose. Splitting on a wide horizontal gap keeps both readable and keeps the
-// right column's words out of the caption.
-function columnRuns(line) {
+// A wide gap separates column runs on its own. A narrow gutter needs an
+// independent paragraph or numbered-legend boundary in the layout. Each run
+// keeps its own type size and leading instead of inheriting its neighbour's.
+function columnRuns(line, regions) {
     const items = [...(line.items || [])].sort((left, right) => left.bbox[0] - right.bbox[0]);
     const runs = [];
     let current = null;
     for (const item of items) {
-        if (current && item.bbox[0] - current.right > COLUMN_GAP) {
+        if (current && (item.bbox[0] - current.right > COLUMN_GAP
+            || item.bbox[0] > current.right && regions.some(block =>
+                columnBoundary(current.items.at(-1), item, block.bbox)))) {
             runs.push(current);
             current = null;
         }
@@ -906,6 +989,16 @@ function columnRuns(line) {
     }
     if (current) runs.push(current);
     return runs.length > 1 ? runs : null;
+}
+
+function columnBoundary(left, right, box) {
+    const contains = item => {
+        const x = (item.bbox[0] + item.bbox[2]) / 2;
+        const y = (item.bbox[1] + item.bbox[3]) / 2;
+        return x >= box[0] && x <= box[2] && y >= box[1] - EDGE_TOLERANCE && y <= box[3] + EDGE_TOLERANCE;
+    };
+    return left.bbox[2] <= box[0] && right.bbox[0] >= box[0] - EDGE_TOLERANCE && contains(right)
+        || right.bbox[0] >= box[2] && left.bbox[2] <= box[2] + EDGE_TOLERANCE && contains(left);
 }
 
 // A number printed alone on its line ("FIGURE 2", "Fig. 4."), never a caption.

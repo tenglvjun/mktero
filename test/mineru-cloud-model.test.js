@@ -16,6 +16,9 @@ import {
     MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID,
+    MINERU_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+    MINERU_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+    MINERU_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID,
@@ -23,6 +26,9 @@ import {
     MINERU_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID,
     MINERU_DOCUMENT_PIPELINE,
+    MINERU_LOCAL_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+    MINERU_LOCAL_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+    MINERU_LOCAL_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
     MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V13_FIGURE_V19_PARSER_PROFILE_ID,
@@ -33,6 +39,9 @@ import {
     MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID,
+    MINERU_PIPELINE_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+    MINERU_PIPELINE_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+    MINERU_PIPELINE_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID,
     MINERU_PIPELINE_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID,
@@ -98,11 +107,26 @@ test('derives a separate pipeline identity from the same document and figure ver
     assert.equal('document' in request, false);
 });
 
-test('keeps the shipped Pipeline identities as independent literals after the IR v26 figure v29 upgrade', () => {
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID);
+test('keeps the shipped Pipeline identities as independent literals after the IR v29 figure v29 upgrade', () => {
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID);
+    assert.equal(MINERU_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+        '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v28","figureStructure":"figure-region-v29"}');
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID);
+    assert.equal(MINERU_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+        '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v27","figureStructure":"figure-region-v29"}');
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[2], MINERU_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID);
+    assert.equal(MINERU_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
+        '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v26","figureStructure":"figure-region-v29"}');
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[3], MINERU_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID);
     assert.equal(MINERU_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v25","figureStructure":"figure-region-v28"}');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[4], MINERU_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+        '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v28","figureStructure":"figure-region-v29"}');
+    assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+        '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v27","figureStructure":"figure-region-v29"}');
+    assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
+        '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v26","figureStructure":"figure-region-v29"}');
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v25","figureStructure":"figure-region-v28"}');
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID,
@@ -116,6 +140,9 @@ test('keeps the shipped Pipeline identities as independent literals after the IR
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v20","figureStructure":"figure-region-v25"}');
     assert.deepEqual(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS, [
+        MINERU_PIPELINE_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+        MINERU_PIPELINE_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+        MINERU_PIPELINE_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID,
@@ -138,56 +165,87 @@ test('keeps the shipped Pipeline identities as independent literals after the IR
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v13","figureStructure":"figure-region-v19"}');
     assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).figureStructure, 'figure-region-v29');
     assert.equal(JSON.parse(mineruCloudProfilesFor('pipeline').cacheProfile).document, MINERU_DOCUMENT_PIPELINE);
-    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v26');
+    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v29');
     // Every shipped identity stays literal so corrections still open after the bump.
-    assert.equal(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[2],
+    assert.equal(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[5],
         MINERU_PIPELINE_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID);
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v23","figureStructure":"figure-region-v27"}');
-    assert.equal(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[3],
+    assert.equal(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[6],
         MINERU_PIPELINE_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID);
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v22","figureStructure":"figure-region-v27"}');
-    assert.equal(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[4],
+    assert.equal(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[7],
         MINERU_PIPELINE_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID);
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v21","figureStructure":"figure-region-v26"}');
-    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[6]).document, 'mineru-document-ir-v19');
-    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[6]).figureStructure, 'figure-region-v24');
-    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[7]).document, 'mineru-document-ir-v18');
-    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[7]).figureStructure, 'figure-region-v23');
+    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[9]).document, 'mineru-document-ir-v19');
+    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[9]).figureStructure, 'figure-region-v24');
+    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[10]).document, 'mineru-document-ir-v18');
+    assert.equal(JSON.parse(MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS[10]).figureStructure, 'figure-region-v23');
     assert.equal(JSON.parse(MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID).document, 'mineru-document-ir-v17');
     assert.equal(JSON.parse(MINERU_PIPELINE_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID).figureStructure, 'figure-region-v22');
     assert.equal(MINERU_PIPELINE_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"pipeline","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v16","figureStructure":"figure-region-v21"}');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[2], MINERU_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[5], MINERU_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID);
     assert.equal(MINERU_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v23","figureStructure":"figure-region-v27"}');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[3], MINERU_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID);
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[4], MINERU_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[6], MINERU_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[7], MINERU_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID);
     assert.equal(MINERU_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID,
         '{"batch":{"model_version":"vlm","enable_formula":true,"enable_table":true},"file":{"is_ocr":true},"document":"mineru-document-ir-v21","figureStructure":"figure-region-v26"}');
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[6], MINERU_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID);
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[7], MINERU_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID);
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[8], MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID);
-    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[9], MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[9], MINERU_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[10], MINERU_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[11], MINERU_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID);
+    assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS[12], MINERU_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID);
     assert.equal(MINERU_PREVIOUS_PARSER_PROFILE_IDS.includes(MINERU_PARSER_PROFILE_ID), false);
 });
 
-test('selects previous profiles only for the exact current cloud model identity', () => {
-    for (const [modelVersion, expected] of [
-        ['vlm', MINERU_PREVIOUS_PARSER_PROFILE_IDS],
-        ['pipeline', MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS],
+test('selects isolated v28, v27 and v26 histories only for the exact current v29 cloud model identity', () => {
+    for (const [modelVersion, expected, previousProfiles] of [
+        ['vlm', MINERU_PREVIOUS_PARSER_PROFILE_IDS, [
+            MINERU_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
+        ]],
+        ['pipeline', MINERU_PIPELINE_PREVIOUS_PARSER_PROFILE_IDS, [
+            MINERU_PIPELINE_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_PIPELINE_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_PIPELINE_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
+        ]],
     ]) {
         const current = mineruCloudProfilesFor(modelVersion).cacheProfile;
         const previous = mineruCloudPreviousParserProfilesFor(current);
         assert.equal(previous, expected);
+        assert.deepEqual(previous.slice(0, previousProfiles.length), previousProfiles);
         assert.ok(previous.every(profile => JSON.parse(profile).batch.model_version === modelVersion));
         assert.equal(previous.includes(current), false);
+        for (const profile of [
+            MINERU_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_PIPELINE_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_LOCAL_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_PIPELINE_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_LOCAL_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_PIPELINE_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
+            MINERU_LOCAL_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
+        ]) {
+            assert.equal(previous.includes(profile), previousProfiles.includes(profile));
+        }
     }
     for (const unknown of [
         undefined, null, '', 'vlm', 'pipeline', {},
         MINERU_LOCAL_PARSER_PROFILE_ID,
+        MINERU_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+        MINERU_PIPELINE_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+        MINERU_LOCAL_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID,
+        MINERU_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+        MINERU_PIPELINE_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+        MINERU_LOCAL_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID,
+        MINERU_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
+        MINERU_PIPELINE_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
+        MINERU_LOCAL_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID,
         MINERU_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID,
         MINERU_PIPELINE_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID,
         MINERU_REQUEST_PROFILE_ID,
@@ -206,7 +264,48 @@ test('selects previous profiles only for the exact current cloud model identity'
     }
 });
 
+for (const [modelVersion, previousProfile] of [
+    ['vlm', MINERU_LOCAL_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID],
+    ['pipeline', MINERU_LOCAL_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID],
+    ['vlm', MINERU_LOCAL_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID],
+    ['pipeline', MINERU_LOCAL_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID],
+    ['vlm', MINERU_LOCAL_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID],
+    ['pipeline', MINERU_LOCAL_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID],
+]) {
+    for (const method of ['extract', 'readCached']) {
+        const version = JSON.parse(previousProfile).document;
+        test(`${method} never reads a local ${version} correction from ${modelVersion} after the IR v29 upgrade`, async () => {
+            const keyFor = parserProfile => createMarkdownCacheKey(new Uint8Array([1]), { parserProfile });
+            const localKey = await keyFor(previousProfile);
+            const reads = [];
+            const extractor = createRevisionExtractor(modelVersion, async ({ cacheKey }) => {
+                reads.push(cacheKey);
+                return cacheKey === localKey ? { markdown: '# Local correction' } : null;
+            });
+            extractor.conversion = {
+                convert: async () => ({ origin: 'fresh', result: { markdown: '# Current result' } }),
+                readCached: async () => null,
+            };
+
+            const result = await extractor[method](42);
+
+            assert.equal(result?.markdown ?? null, method === 'extract' ? '# Current result' : null);
+            const currentProfile = mineruCloudProfilesFor(modelVersion).cacheProfile;
+            assert.deepEqual(reads, await Promise.all([
+                currentProfile, ...mineruCloudPreviousParserProfilesFor(currentProfile),
+            ].map(keyFor)));
+            assert.equal(reads.includes(localKey), false);
+        });
+    }
+}
+
 for (const [modelVersion, previousProfile, otherPreviousProfile] of [
+    ['vlm', MINERU_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID, MINERU_PIPELINE_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID],
+    ['pipeline', MINERU_PIPELINE_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID, MINERU_DOCUMENT_IR_V28_FIGURE_V29_PARSER_PROFILE_ID],
+    ['vlm', MINERU_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID, MINERU_PIPELINE_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID],
+    ['pipeline', MINERU_PIPELINE_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID, MINERU_DOCUMENT_IR_V27_FIGURE_V29_PARSER_PROFILE_ID],
+    ['vlm', MINERU_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID, MINERU_PIPELINE_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID],
+    ['pipeline', MINERU_PIPELINE_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID, MINERU_DOCUMENT_IR_V26_FIGURE_V29_PARSER_PROFILE_ID],
     ['vlm', MINERU_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID, MINERU_PIPELINE_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID],
     ['pipeline', MINERU_PIPELINE_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID, MINERU_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID],
     ['vlm', MINERU_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID, MINERU_PIPELINE_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID],
@@ -220,18 +319,18 @@ for (const [modelVersion, previousProfile, otherPreviousProfile] of [
 
     for (const method of ['extract', 'readCached']) {
         const version = JSON.parse(previousProfile).document;
-        test(`${method} reopens the ${modelVersion} ${version} correction after a profile upgrade`, async () => {
+        test(`${method} reopens the ${modelVersion} ${version} correction after the IR v29 upgrade`, async () => {
             const currentKey = await keyFor(currentProfile);
             const previousKey = await keyFor(previousProfile);
             const reads = [];
             const extractor = createRevisionExtractor(modelVersion, async ({ cacheKey }) => {
                 reads.push(cacheKey);
-                return cacheKey === previousKey ? { markdown: '# Corrected v23' } : null;
+                return cacheKey === previousKey ? { markdown: `# Corrected ${version}` } : null;
             });
 
             const result = await extractor[method](42);
 
-            assert.equal(result.markdown, '# Corrected v23');
+            assert.equal(result.markdown, `# Corrected ${version}`);
             assert.equal(result.parserProfile, previousProfile);
             assert.equal(result.cacheKey, previousKey);
             const history = mineruCloudPreviousParserProfilesFor(currentProfile);
@@ -239,7 +338,7 @@ for (const [modelVersion, previousProfile, otherPreviousProfile] of [
             assert.deepEqual(reads, [currentKey, ...await Promise.all(tried.map(keyFor))]);
         });
 
-        test(`${method} never accesses another model's correction from ${modelVersion}`, async () => {
+        test(`${method} never accesses another model's ${version} correction from ${modelVersion}`, async () => {
             const otherKey = await keyFor(otherPreviousProfile);
             const reads = [];
             const extractor = createRevisionExtractor(modelVersion, async ({ cacheKey }) => {
@@ -262,13 +361,13 @@ for (const [modelVersion, previousProfile, otherPreviousProfile] of [
         });
     }
 
-    test(`${modelVersion} inherits every earlier translation without reading another model`, async () => {
+    test(`${modelVersion} inherits the ${JSON.parse(previousProfile).document} translation without reading another model after the IR v29 upgrade`, async () => {
         const currentKey = await keyFor(currentProfile);
+        const previousKey = await keyFor(previousProfile);
         const otherKey = await keyFor(otherPreviousProfile);
         const previousKeys = await Promise.all(mineruCloudPreviousParserProfilesFor(currentProfile).map(keyFor));
-        // The available identity is always the first of this model's history,
-        // so the loop also proves the search stops at the first hit.
-        for (const availableKey of [previousKeys[0]]) {
+        // Earlier missing translations are skipped until this literal is found.
+        for (const availableKey of [previousKey]) {
             const copies = [];
             const conversion = new MinerUConversion({
                 client: createSuccessfulClient('# Converted'),
@@ -300,7 +399,8 @@ for (const [modelVersion, previousProfile, otherPreviousProfile] of [
             assert.deepEqual(result.warnings, []);
             // Every earlier identity of this model is tried in order, and the
             // first one with a translation stops the search.
-            assert.deepEqual(copies, [[availableKey, currentKey]]);
+            const tried = previousKeys.slice(0, previousKeys.indexOf(availableKey) + 1);
+            assert.deepEqual(copies, tried.map(key => [key, currentKey]));
             assert.equal(copies.some(([from]) => from === otherKey), false);
         }
         // Another model's identity is never read, even when it is the only one

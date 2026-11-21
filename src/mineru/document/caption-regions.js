@@ -45,7 +45,7 @@ export function readPDFCaptionRegions(page, items, blocks, { parseCaption, maxWo
         const parts = lines.map(line => ({
             line, text: nativeLineText(line.items),
         }));
-        const nativeText = parts.map(part => part.text).join(' ');
+        const nativeText = normalizeNativeCaptionLabel(parts.map(part => part.text).join(' '), labeled.label);
         if (nativeText.length > FIGURE_LIMITS.maxCaptionLength) continue;
         const nativeLabel = parseCaption(nativeText);
         if (!nativeLabel || number(nativeLabel.label) !== number(labeled.label)
@@ -69,7 +69,17 @@ export function readPDFCaptionRegions(page, items, blocks, { parseCaption, maxWo
     return { regions, work, exhausted: false };
 }
 
-function nativeLineText(items) {
+// Tracking can become literal spaces in the PDF text layer ("F I G U R E").
+// Only the leading keyword already identified by OCR may lose these spaces;
+// the number and every word of the description still have to agree in order.
+function normalizeNativeCaptionLabel(text, label) {
+    const keyword = /^[a-z]+/iu.exec(label)?.[0];
+    if (!keyword) return text;
+    const pattern = new RegExp(`^${[...keyword].join('[ \\t]*')}(?=\\.?[ \\t]+\\d)`, 'iu');
+    return text.replace(pattern, keyword);
+}
+
+export function nativeLineText(items) {
     let text = '';
     let previous = null;
     for (const item of items) {

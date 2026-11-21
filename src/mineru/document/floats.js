@@ -4,12 +4,41 @@ import {
 } from '../../markdown/markdown-figures.js';
 import { BLOCK_KIND, BLOCK_ROLE, blockPlainText, fragmentText, isFloatBlock } from './ir.js';
 import { sanitizeTableHTML } from './text.js';
+import { noteMarker } from './notes.js';
 
 const NOTE_FLOAT_KINDS = new Set([BLOCK_KIND.IMAGE, BLOCK_KIND.CHART, BLOCK_KIND.TABLE]);
 const NOTE_START = /^(?:\^\{|[*†‡§¶#]|\(?[a-z]\)\s|notes?\b|abbreviations?\b|sources?\b|data (?:are|is|were)\b|values (?:are|were)\b|numbers (?:are|were)\b|results (?:are|were)\b|all values\b|p\s*[<>=≤≥]|n\s*=)/iu;
 const MAX_NOTE_GAP = 14;
 const MAX_NOTE_WORDS = 160;
 const HORIZONTAL_SLACK = 12;
+
+// Explicit notes and continuous original note rows retain their source
+// float even when the last row sits closer to a neighbouring picture.
+export function protectedFloatNotes(float) {
+    const notes = (float.children || []).filter(child => child.kind === 'footnote'
+        && child.originalFootnote?.ownerId === float.id
+        && child.originalFootnote.ownerKind === float.kind && child.pageIndex === float.pageIndex);
+    const protectedNotes = new Set(notes.filter(child => NOTE_START.test(blockPlainText(child).trim())
+        || noteMarker(child)));
+    const located = notes.filter(child => validBox(child.bbox))
+        .sort((left, right) => left.bbox[1] - right.bbox[1] || left.bbox[0] - right.bbox[0]);
+    const body = bodyBox(float);
+    for (const [index, child] of located.entries()) {
+        const box = child.bbox;
+        if (validBox(body) && box[1] >= body[3] - 4 && box[1] - body[3] <= MAX_NOTE_GAP
+            && box[0] >= body[0] - HORIZONTAL_SLACK && box[2] <= body[2] + HORIZONTAL_SLACK) {
+            protectedNotes.add(child);
+        }
+        for (let previousIndex = 0; previousIndex < index; previousIndex++) {
+            const previous = located[previousIndex];
+            if (box[1] < previous.bbox[3] - 4 || box[1] - previous.bbox[3] > MAX_NOTE_GAP
+                || Math.min(box[2], previous.bbox[2]) <= Math.max(box[0], previous.bbox[0])) continue;
+            protectedNotes.add(previous);
+            protectedNotes.add(child);
+        }
+    }
+    return protectedNotes;
+}
 
 // MinerU sometimes leaves a table or figure footnote as body text right under
 // its float. A short block that sits directly below a float, inside its
