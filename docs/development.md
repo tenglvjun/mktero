@@ -342,3 +342,27 @@ and no top-level navigation. The preview must not need any of them.
 
 The validator also loads it that way (`/__embed.html`). It fails if the preview
 does not start, its checks fail, or storage is readable.
+
+## EPUB rendering validation
+
+Use an external Playwright installation to exercise the real MathML, canvas,
+PNG, and EPUB export paths in both Chromium and Firefox:
+
+```bash
+MKTERO_PLAYWRIGHT_PATH=/path/to/node_modules/playwright/index.mjs \
+MKTERO_EPUB_BROWSERS=chrome,firefox node scripts/validate-epub-browser.mjs
+```
+
+The required browsers must already be installed. Reports, formula and table
+PNGs, and sample EPUBs go to `build/epub-validation/`. The checks cover genuine
+KaTeX output in standalone formulas, table cells, and wide tables, reject unsafe
+markup, and assert that rendering makes no external requests.
+
+On macOS, the validator gives Firefox a fresh temporary Core Foundation home
+through the browser process's `CFFIXED_USER_HOME`. This avoids the Firefox 157
+startup failure reported in [Playwright #42768](https://github.com/microsoft/playwright/issues/42768)
+on macOS 27, where access to the default app-data directory can fail despite an
+explicit profile. Standard directories are created before launch to avoid
+macOS deny-delete ACLs. The real `HOME` and installed browser lookup stay
+unchanged; the temporary home is removed after browser shutdown, including
+when launch or validation fails.

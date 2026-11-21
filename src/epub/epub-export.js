@@ -652,10 +652,7 @@ function stripMathAnnotationsFromReferenceLinks(html, referenceHrefs) {
             const openingTag = /^<a\b[^>]*>/iu.exec(anchor)?.[0] || '';
             const href = /\bhref\s*=\s*(["'])(.*?)\1/iu.exec(openingTag)?.[2];
             if (!referenceHrefs.has(href) || !/<math\b/iu.test(anchor)) return anchor;
-            return anchor.replace(
-                /<annotation\b(?=[^>]*\bencoding\s*=\s*(["'])application\/x-tex\1)[^>]*>[\s\S]*?<\/annotation\s*>/giu,
-                ''
-            );
+            return stripMathSourceAnnotations(anchor);
         }
     );
 }
@@ -665,12 +662,21 @@ function decodeURIComponentSafe(value) {
     catch { return value; }
 }
 
+function stripMathSourceAnnotations(markup) {
+    // Only KaTeX's duplicate TeX text is dispensable. An annotation-xml or
+    // another encoding must remain visible to the renderer's validator.
+    return markup.replace(
+        /<annotation(?=[\s>])(?=[^>]*\sencoding\s*=\s*(["'])application\/x-tex\1)[^>]*>[^<]*<\/annotation\s*>/giu,
+        ''
+    );
+}
+
 async function replaceMathWithImages(html, renderMathToPNG, images) {
     let output = '';
     let offset = 0;
     let imageBytes = [...images.values()].reduce((total, image) => total + image.data.byteLength, 0);
     for (const match of html.matchAll(/<math\b[^>]*>[\s\S]*?<\/math\s*>/gu)) {
-        const math = match[0].replace(/<annotation\b[^>]*>[\s\S]*?<\/annotation\s*>/gu, '');
+        const math = stripMathSourceAnnotations(match[0]);
         let image = images.get(math);
         if (!image) {
             if (images.size >= EPUB_PACKAGE_LIMITS.maxAssets) {
