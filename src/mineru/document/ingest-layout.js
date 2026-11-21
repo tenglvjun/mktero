@@ -327,7 +327,9 @@ function buildFloat(block, raw, context) {
         if (kind !== 'body') {
             const fragments = simpleFragments(child, block.pageIndex, context);
             if (fragments.length) {
-                block.children.push({ id: `${block.id}:${kind}${counts[kind]++}`, kind, pageIndex: block.pageIndex, bbox, fragments });
+                block.children.push({ id: `${block.id}:${kind}${counts[kind]++}`, kind, pageIndex: block.pageIndex,
+                    bbox, fragments, ...(kind === 'footnote'
+                        ? { originalFootnote: { ownerId: block.id, ownerKind: block.kind } } : {}) });
             }
             continue;
         }

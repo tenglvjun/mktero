@@ -16,6 +16,7 @@ import { composeFigureDraft } from '../src/figures/figure-transaction.js';
 import { isValidSourceMapEntry, resolveSourceMapLocation } from '../src/core/markdown-source-map.js';
 import { createTestPNG } from './helpers/figure-fixtures.js';
 import { renderMarkdownHTML } from '../src/markdown/markdown-html.js';
+import { extractMarkdownAssetOutline } from '../src/markdown/markdown-asset-outline.js';
 
 const PAGE = 1000;
 const PITCH = 12;
@@ -108,7 +109,7 @@ function assertRecovered(values) {
     assert.equal(captionChildren(owner).length, 1, 'the one picture must carry one complete caption');
     assert.equal(source?.captionConsumed, true, 'the verified source block must leave body flow');
     assert.equal(source.captionConsumedFor, owner.id);
-    assert.equal(input.markdown.split(`Figure ${values.number}:`).length - 1, 1);
+    assert.equal(input.markdown.split(values.label || `Figure ${values.number}:`).length - 1, 1);
     assert.equal(captionChildren(owner)[0].fragments.map(fragment => fragmentText(fragment)).join(' '), values.ocrText,
         'the complete OCR text must survive the migration');
     assert.ok(input.markdown.includes(PROSE));
@@ -118,7 +119,8 @@ function assertRecovered(values) {
     assert.equal(pieces.length, 1);
     assert.ok(pieces[0].sourceRanges.length > 0);
     const range = pieces[0].sourceRanges[0];
-    assert.ok(input.markdown.slice(range.from, range.to).includes(`Figure ${values.number}:`));
+    const label = values.label || `Figure ${values.number}:`;
+    assert.ok(input.markdown.slice(range.from, range.to).includes(label));
     const document = prepareMinerUResult(input);
     assert.ok(document.sourceMap.length > 0);
     assert.ok(document.sourceMap.every(entry => isValidSourceMapEntry(entry, document.markdown.length)));
@@ -378,6 +380,82 @@ test('does not add another caption or consumption record when restoration runs t
     restorePDFFigureCaptions(ir, values.pdfText);
     assert.equal(JSON.stringify({ blocks: ir.blocks, releasedCaptions: ir.releasedCaptions }), before);
     assert.equal(serializeDocumentIR(ir).markdown, markdown);
+});
+
+for (const [label, native, placement] of [
+    ['FIGURE 1', 'F I G U R E 1', 'left'],
+    ['Figure 12:', 'F i g u r e 12:', 'right'],
+    ['Fig. 37:', 'F i g. 37:', 'above'],
+    ['Chart 12:', 'C H A R T 12:', 'below'],
+    ['Scheme 12:', 'S c h e m e 12:', 'left'],
+    ['Algorithm 12:', 'A L G O R I T H M 12:', 'right'],
+]) {
+    test(`recovers a complete ${placement} caption with the tracked PDF label ${native}`, () => {
+        const number = Number(/\d+/u.exec(label)[0]);
+        const lines = [
+            `${label} Comparison of independent measurements.`,
+            'Intervals describe uncertainty for the reference cohort.',
+            'All estimates use the same population.',
+        ];
+        const values = fixture({ number, lines, placement,
+            nativeLines: lines.map(value => value.replace(label, native)) });
+        values.label = label;
+        const { input, ir } = assertRecovered(values);
+        const candidates = resolveFigureCandidates(bindFigureSourceRanges(input));
+        assert.equal(candidates.length, 1);
+        assert.equal(candidates[0].decision, 'compose');
+        assert.equal(candidates[0].label, label);
+        const draft = composeFigureDraft(input, [{ candidate: candidates[0],
+            assetPath: 'generated/figures/tracked.png',
+            crop: { data: createTestPNG(400, 490), mimeType: 'image/png', width: 400, height: 490 } }]);
+        const composed = prepareMinerUResult(draft.input);
+        for (const output of [prepareMinerUResult(input), composed]) {
+            const { document: rendered } = parseHTML(renderMarkdownHTML(output.markdown));
+            assert.equal(rendered.querySelectorAll('figure').length, 1);
+            assert.equal(rendered.querySelectorAll('figcaption').length, 1);
+            assert.equal(rendered.querySelector('figcaption').textContent, values.ocrText);
+            const outline = extractMarkdownAssetOutline(output.markdown);
+            assert.equal(outline.filter(item => item.type === 'figure').length, 1);
+            assert.equal(outline.find(item => item.type === 'figure').text, values.ocrText);
+            assert.ok(output.markdown.includes(PROSE));
+        }
+        const before = JSON.stringify(ir.blocks);
+        restorePDFFigureCaptions(ir, values.pdfText);
+        assert.equal(JSON.stringify(ir.blocks), before);
+    });
+}
+
+test('recovers a tracked keyword split into separate PDF glyph items without changing its OCR spans', () => {
+    const values = fixture();
+    const left = values.captionBBox[0];
+    values.pdfText.pages[0].items.splice(0, 1,
+        ...[...'FIGURE'].map((letter, index) => pdfLine(letter, values.top,
+            { left: left + index * 9, width: 6, fontName: 'caption-bold' })),
+        pdfLine('12:', values.top, { left: left + 60, width: 18, fontName: 'caption-bold' }),
+        pdfLine(values.lines[0].slice('Figure 12:'.length).trim(), values.top,
+            { left: left + 90, width: 280 }),
+    );
+    const { owner, source } = assertRecovered(values);
+    assert.equal(captionChildren(owner)[0].fragments, source.fragments);
+});
+
+for (const native of [
+    'F I G U R E 13: Comparison of independent measurements.',
+    'F I G U R E 1 2: Comparison of independent measurements.',
+    'F I G U R E 12: C o m p a r i s o n of independent measurements.',
+    'S C H E M E 12: Comparison of independent measurements.',
+    'F I G U R E X 12: Comparison of independent measurements.',
+]) {
+    test(`retains a region when normalizing its keyword still leaves a different label or description: ${native}`, () => {
+        const lines = captionLines(12, 3);
+        assertRetained(fixture({ lines, nativeLines: [native, ...lines.slice(1)] }));
+    });
+}
+
+test('does not repair a tracked label from an incomplete native caption', () => {
+    const lines = captionLines(12, 3);
+    assertRetained(fixture({ lines,
+        nativeLines: [lines[0].replace('Figure', 'F I G U R E'), lines[2]] }));
 });
 
 test('keeps a paragraph beginning with a figure reference as body text', () => {

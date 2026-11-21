@@ -82,6 +82,20 @@ native runs at its own box rather than against the whole printed row. A misfiled
 whose destination or component is not unique retains its original ownership
 and fragments; dependent figures are not repaired in separate partial steps.
 
+A short figure title may be filed as an original footnote of another float,
+including the table above it. The PDF text layer can split a word into touching
+glyph runs, so native verification joins those runs while preserving real word
+spacing and checks the title's complete text at its printed location. Only an
+original float footnote with that text agreement, a complete shared caption,
+and one unobstructed picture owner in the closed component can move into figure
+text. Its own position extends the ordinary region crop, including for vector
+charts. Original fragments and their source remain traceable, and the title
+leaves the reading flow only after a successful crop; a failed crop keeps it
+visible. Explicit footnote markers or note prefixes, notes continuing directly
+from their float body, and consecutive original footnote rows retain their
+source float even when the last row is close to a picture. Ordinary prose,
+multiple owners, and conflicting content also retain their original placement.
+
 Mixing a table with a chart still requires one native PDF image and verified
 panel pixels, as described below.
 
@@ -112,6 +126,24 @@ reading document is written. It accepts captions written on one line or wrapped
 across lines, with or without a trailing period, and captions aligned with the
 outer frame rather than centred over the picture.
 
+On a two-column page, caption lines and body lines in the neighbouring column
+can share a baseline even when the gutter is narrow. Layout bounds of independent
+paragraphs or a complete numbered OCR caption split native lines into separate
+text runs. Each run uses its own character height and baseline when reading the
+caption and its continuation, so larger type in the adjacent column cannot change
+those measurements. The same boundaries also separate columns set in the same
+font size. A complete numbered OCR caption can provide the boundary even when no
+independent body paragraph box is available.
+
+This prevents native recovery from mixing neighbouring body text into an already
+correct legend and inventing a second, truncated caption with the same number on
+an uncaptioned fragment. When two stacked OCR images share a complete legend
+stored only on the lower fragment, the shared-caption grouping checks can then
+keep them in one figure with one complete caption. Adjacent body text stays in
+the reading flow. Split runs still count towards reading budgets; missing or
+conflicting layout evidence does not justify consuming body text or forcing a
+merge.
+
 A complete caption can also be misclassified as a separate body paragraph
 above, below, or on either side of a figure on the same page. Mktero checks
 native PDF text inside that paragraph's region before assigning it to a single
@@ -123,6 +155,13 @@ formula and link spans, to move into the caption. The source paragraph is then
 consumed once, so the full caption is not repeated in the body. Body references,
 incomplete readings, conflicting owners, and exhausted budgets leave the
 original paragraph intact.
+
+When OCR already identifies the region's opening caption keyword, verification
+can normalize letter spacing in that keyword in the PDF text layer, such as
+`F I G U R E` → `FIGURE`. Only that opening keyword receives this normalization;
+the figure number, description order, and repeated words must still agree under
+the existing text comparison rules. The complete region must verify and have a
+unique, unobstructed owner before its original OCR content moves into the caption.
 
 A picture can also carry lettered panel descriptions such as `(D) Identify a
 context` in place of its real caption. If a complete body-block legend names
