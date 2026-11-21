@@ -100,6 +100,24 @@ for (const marker of ['b', '(b)', '( B )', 'B.', '（ B ）']) {
     });
 }
 
+for (const nativeLetter of [false, true]) {
+    test(`repairs displaced captions beside a correctly owned panel letter (${nativeLetter ? 'native' : 'raster'})`, () => {
+        const { result, pdfText } = fixture(({ blocks, items }) => {
+            blocks[1].blocks.push(text('chart_caption', [180, 455, 190, 470], 'A'));
+            if (nativeLetter) items.push(line('B', 505, 470, 10));
+        });
+        const input = createMinerUFigureInput(result, { pdfText });
+        const ir = input.providerState.mineruDocument.ir;
+        assert.deepEqual(strings(ir.blocks[0]), [UPPER]);
+        assert.deepEqual(strings(ir.blocks[1]), ['A']);
+        assert.deepEqual(strings(ir.blocks[2]), [SHARED, 'B']);
+        assert.equal(ir.blocks[1].pdfFigure?.label, 'Fig. 15');
+        assert.equal(ir.blocks[2].pdfFigure?.label, 'Fig. 15');
+        assert.deepEqual(ir.captionMoves.filter(move => move.reason === 'panel-label')
+            .map(move => [move.from, move.to]), [['p0-0', 'p0-2']]);
+    });
+}
+
 test('matches full-width panel references in a native legend', () => {
     const { ir } = restore(({ items }) => {
         items[1].text = PRINTED.replaceAll('(', '（').replaceAll(')', '）');

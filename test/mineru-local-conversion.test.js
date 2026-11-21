@@ -4,6 +4,7 @@ import { MinerULocalConversion } from '../src/mineru/local-conversion.js';
 import {
     MINERU_LOCAL_PARSER_PROFILE_ID,
     MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS,
+    MINERU_LOCAL_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID,
     MINERU_LOCAL_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID,
     MINERU_LOCAL_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID,
     MINERU_LOCAL_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID,
@@ -11,15 +12,17 @@ import {
     MINERU_LOCAL_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID,
 } from '../src/mineru/parser-profile.js';
 
-test('retains the previous local equation cache identity as a literal', () => {
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_LOCAL_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID);
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_LOCAL_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID);
+test('retains the shipped local cache identities as literals', () => {
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_LOCAL_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID, '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v25","figureStructure":"figure-region-v28"}');
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_LOCAL_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[2], MINERU_LOCAL_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID);
     assert.equal(MINERU_LOCAL_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID, '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v23","figureStructure":"figure-region-v27"}');
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[2], MINERU_LOCAL_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[3], MINERU_LOCAL_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID);
     assert.equal(MINERU_LOCAL_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID, '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v22","figureStructure":"figure-region-v27"}');
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[3], MINERU_LOCAL_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[4], MINERU_LOCAL_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID);
     assert.equal(MINERU_LOCAL_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID, '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v21","figureStructure":"figure-region-v26"}');
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[4], MINERU_LOCAL_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[5], MINERU_LOCAL_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID);
     assert.equal(MINERU_LOCAL_DOCUMENT_IR_V20_FIGURE_V25_PARSER_PROFILE_ID, '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v20","figureStructure":"figure-region-v25"}');
 });
 
@@ -175,24 +178,24 @@ test('a new document pipeline reads a stored local result again without the serv
 
 test('the local parser profile records its document pipeline and keeps the shipped literal', async () => {
     const { MINERU_DOCUMENT_PIPELINE, MINERU_LOCAL_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID, MINERU_LOCAL_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID, MINERU_LOCAL_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID, MINERU_LOCAL_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID, MINERU_LOCAL_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID, MINERU_LOCAL_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID, MINERU_LOCAL_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID, MINERU_LOCAL_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID, MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS, MINERU_LOCAL_REQUEST_PROFILE_ID } = await import('../src/mineru/parser-profile.js');
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_LOCAL_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[0], MINERU_LOCAL_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_LOCAL_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID);
     assert.equal(JSON.parse(MINERU_LOCAL_PARSER_PROFILE_ID).document, MINERU_DOCUMENT_PIPELINE);
-    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v25');
-    assert.equal(JSON.parse(MINERU_LOCAL_PARSER_PROFILE_ID).figureStructure, 'figure-region-v28');
-    // The identity this build replaced stays literal, so corrections made
-    // under it still open after the bump.
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[1], MINERU_LOCAL_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID);
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[2], MINERU_LOCAL_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID);
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[3], MINERU_LOCAL_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID);
+    assert.equal(MINERU_DOCUMENT_PIPELINE, 'mineru-document-ir-v26');
+    assert.equal(JSON.parse(MINERU_LOCAL_PARSER_PROFILE_ID).figureStructure, 'figure-region-v29');
+    // Every shipped identity stays literal so corrections still open after the bump.
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[2], MINERU_LOCAL_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[3], MINERU_LOCAL_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[4], MINERU_LOCAL_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID);
     assert.equal(JSON.parse(MINERU_LOCAL_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID).document, 'mineru-document-ir-v21');
     assert.equal(JSON.parse(MINERU_LOCAL_DOCUMENT_IR_V21_FIGURE_V26_PARSER_PROFILE_ID).figureStructure, 'figure-region-v26');
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[5], MINERU_LOCAL_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[6], MINERU_LOCAL_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID);
     assert.equal(JSON.parse(MINERU_LOCAL_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID).document, 'mineru-document-ir-v19');
     assert.equal(JSON.parse(MINERU_LOCAL_DOCUMENT_IR_V19_FIGURE_V24_PARSER_PROFILE_ID).figureStructure, 'figure-region-v24');
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[6], MINERU_LOCAL_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[7], MINERU_LOCAL_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID);
     assert.equal(JSON.parse(MINERU_LOCAL_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID).document, 'mineru-document-ir-v18');
     assert.equal(JSON.parse(MINERU_LOCAL_DOCUMENT_IR_V18_FIGURE_V23_PARSER_PROFILE_ID).figureStructure, 'figure-region-v23');
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[7], MINERU_LOCAL_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[8], MINERU_LOCAL_DOCUMENT_IR_V17_FIGURE_V22_PARSER_PROFILE_ID);
     // A document-pipeline bump must not touch what the local service was asked
     // to produce, which keys the stored result.
     assert.equal(MINERU_LOCAL_REQUEST_PROFILE_ID, '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip"}');
@@ -201,14 +204,15 @@ test('the local parser profile records its document pipeline and keeps the shipp
         '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v15","figureStructure":"figure-region-v20"}');
     assert.equal(MINERU_LOCAL_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID,
         '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v14","figureStructure":"figure-region-v20"}');
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[8], MINERU_LOCAL_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[9], MINERU_LOCAL_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID);
     assert.equal(MINERU_LOCAL_DOCUMENT_IR_V16_FIGURE_V21_PARSER_PROFILE_ID,
         '{"transport":"local-v1","tier":"standard","ocrMode":"auto","output":"zip-middle-v2","document":"mineru-document-ir-v16","figureStructure":"figure-region-v21"}');
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[9], MINERU_LOCAL_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID);
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[10], MINERU_LOCAL_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID);
-    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[11], MINERU_LOCAL_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[10], MINERU_LOCAL_DOCUMENT_IR_V15_FIGURE_V20_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[11], MINERU_LOCAL_DOCUMENT_IR_V14_FIGURE_V20_PARSER_PROFILE_ID);
+    assert.equal(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS[12], MINERU_LOCAL_DOCUMENT_IR_V13_FIGURE_V20_PARSER_PROFILE_ID);
     assert.deepEqual(MINERU_LOCAL_PREVIOUS_PARSER_PROFILE_IDS,
         [
+            MINERU_LOCAL_DOCUMENT_IR_V25_FIGURE_V28_PARSER_PROFILE_ID,
             MINERU_LOCAL_DOCUMENT_IR_V24_FIGURE_V27_PARSER_PROFILE_ID,
             MINERU_LOCAL_DOCUMENT_IR_V23_FIGURE_V27_PARSER_PROFILE_ID,
             MINERU_LOCAL_DOCUMENT_IR_V22_FIGURE_V27_PARSER_PROFILE_ID,
