@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { parseHTML } from 'linkedom';
 import { projectMinerULayout } from '../src/mineru/document/result-bundle.js';
 import {
     buildMinerUDocumentIR,
@@ -200,7 +201,6 @@ test('preserves OCR mathematical and hyperlink spans while relocating a verified
     assert.ok(spans.some(span => span.type === 'math' && span.content === 'x^2'));
     assert.ok(spans.some(span => span.content === 'Reference data'
         && span.linkURL === 'https://example.org/reference_data'));
-    assert.ok(document.markdown.includes('https://example.org/reference_data'));
     assert.ok(document.markdown.includes('$x^2$'));
     const caption = input.blocks.find(block => block.role === 'caption');
     assert.equal(caption.text, values.ocrText, 'link destinations are not part of matching evidence');
@@ -209,10 +209,11 @@ test('preserves OCR mathematical and hyperlink spans while relocating a verified
     const draft = composeFigureDraft(input, [{ candidate: candidates[0], assetPath: 'generated/figures/links.png',
         crop: { data: createTestPNG(400, 490), mimeType: 'image/png', width: 400, height: 490 } }]);
     for (const output of [document, prepareMinerUResult(draft.input)]) {
-        assert.ok(output.markdown.includes('https://example.org/reference_data'));
         assert.ok(output.markdown.includes('$x^2$'));
-        const html = renderMarkdownHTML(output.markdown);
-        assert.match(html, /<a href="https:\/\/example\.org\/reference_data"[^>]*>Reference data<\/a>/u);
+        const { document: rendered } = parseHTML(renderMarkdownHTML(output.markdown));
+        assert.deepEqual([...rendered.querySelectorAll('a')].map(link => ({
+            text: link.textContent, href: link.getAttribute('href'),
+        })), [{ text: 'Reference data', href: 'https://example.org/reference_data' }]);
         assert.equal(output.markdown.split('Figure 37:').length - 1, 1);
         assert.ok(output.sourceMap.every(entry => isValidSourceMapEntry(entry, output.markdown.length)));
     }
@@ -243,10 +244,10 @@ test('preserves PDF-native links that override provider links before a region ca
     const draft = composeFigureDraft(input, [{ candidate, assetPath: 'generated/figures/native-link.png',
         crop: { data: createTestPNG(400, 490), mimeType: 'image/png', width: 400, height: 490 } }]);
     for (const output of [document, prepareMinerUResult(draft.input)]) {
-        assert.ok(output.markdown.includes(url));
-        assert.equal(output.markdown.includes('https://provider.example/old'), false);
-        assert.match(renderMarkdownHTML(output.markdown),
-            /<a href="https:\/\/example\.org\/native_reference"[^>]*>Reference data<\/a>/u);
+        const { document: rendered } = parseHTML(renderMarkdownHTML(output.markdown));
+        assert.deepEqual([...rendered.querySelectorAll('a')].map(link => ({
+            text: link.textContent, href: link.getAttribute('href'),
+        })), [{ text: 'Reference data', href: url }]);
         assert.equal(output.markdown.split('Figure 12:').length - 1, 1);
     }
 });
