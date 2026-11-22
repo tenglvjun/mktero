@@ -616,7 +616,10 @@ class ZoteroNotesPanel {
         this.handle = null;
         this.mode = 'list';
         this.continuationHintVisible = false;
-        if (this.elements) this.renderContinuationHint();
+        if (this.elements) {
+            this.elements.continuationPrompts.removeAttribute('open');
+            this.renderContinuationHint();
+        }
         if (handle) {
             try {
                 handle.destroy();
@@ -744,10 +747,15 @@ class ZoteroNotesPanel {
     }
 
     renderContinuationHint() {
-        const { continuationHint, continuationText, continuationDismiss } = this.elements;
+        const { continuationHint, continuationText, continuationDismiss,
+            continuationSummary, continuationQuestions } = this.elements;
         continuationHint.hidden = !this.continuationHintVisible || this.mode !== 'editor'
             || !this.canInsert;
         continuationText.textContent = this.t('notes.continueAfterExcerpt');
+        continuationSummary.textContent = this.t('notes.thinkingPrompts');
+        for (const question of continuationQuestions) {
+            question.textContent = this.t(question.dataset.messageKey);
+        }
         setLabel(continuationDismiss, this.t('notes.dismissContinueHint'));
     }
 
@@ -988,17 +996,35 @@ class ZoteroNotesPanel {
         const slot = this.element('slot', 'mktero-zotero-note-slot');
         slot.setAttribute('name', NOTE_EDITOR_SLOT);
         const continuationHint = this.element('div', 'mktero-note-continuation-hint');
+        const continuationBody = this.element('div', 'mktero-note-continuation-body');
         const continuationText = this.element('span', 'mktero-note-continuation-text');
         continuationText.setAttribute('role', 'status');
         continuationText.setAttribute('aria-live', 'polite');
+        const continuationPrompts = this.element('details', 'mktero-note-thinking-prompts');
+        const continuationSummary = this.element('summary', 'mktero-note-thinking-summary');
+        const continuationList = this.element('ul', 'mktero-note-thinking-list');
+        const continuationQuestions = [
+            'notes.thinkingAssumptions',
+            'notes.thinkingMethod',
+            'notes.thinkingConnection',
+            'notes.thinkingUncertainty',
+        ].map(key => {
+            const question = this.element('li');
+            question.dataset.messageKey = key;
+            return question;
+        });
+        continuationList.append(...continuationQuestions);
+        continuationPrompts.append(continuationSummary, continuationList);
+        continuationBody.append(continuationText, continuationPrompts);
         const continuationDismiss = this.iconButton('mktero-note-continuation-dismiss',
             LUCIDE_ICONS.x, 'notes.dismissContinueHint');
         continuationDismiss.addEventListener('click', () => {
             this.continuationHintVisible = false;
+            continuationPrompts.removeAttribute('open');
             this.renderContinuationHint();
             this.handle?.focus?.();
         });
-        continuationHint.append(continuationText, continuationDismiss);
+        continuationHint.append(continuationBody, continuationDismiss);
         editorView.append(editorBar, continuationHint, slot);
         editorView.hidden = true;
 
@@ -1019,7 +1045,8 @@ class ZoteroNotesPanel {
             researchClear, researchStatus, researchSetup, researchSetupText,
             researchCreate, researchChoose, researchChange,
             researchPicker, researchPickerText, researchPickerCancel,
-            continuationHint, continuationText, continuationDismiss, pinButton, editorTarget,
+            continuationHint, continuationText, continuationDismiss,
+            continuationPrompts, continuationSummary, continuationQuestions, pinButton, editorTarget,
             listView,
             editorView,
             titleLabel,

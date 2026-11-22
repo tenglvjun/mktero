@@ -1180,6 +1180,8 @@ main {
     flex: 0 0 auto;
     align-items: start;
     gap: 6px;
+    max-height: 40%;
+    overflow-y: auto;
     padding: 8px 10px;
     border-bottom: 1px solid var(--border-subtle);
     color: var(--text);
@@ -1187,10 +1189,35 @@ main {
     font: 12px/1.5 var(--ui-font);
 }
 
-.mktero-note-continuation-text {
+.mktero-note-continuation-body {
     min-width: 0;
     flex: 1;
     overflow-wrap: anywhere;
+}
+
+.mktero-note-thinking-prompts {
+    margin-top: 4px;
+}
+
+.mktero-note-thinking-summary {
+    width: fit-content;
+    max-width: 100%;
+    color: var(--accent);
+    cursor: pointer;
+}
+
+.mktero-note-thinking-summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+.mktero-note-thinking-list {
+    margin: 6px 0 0;
+    padding-inline-start: 18px;
+}
+
+.mktero-note-thinking-list li + li {
+    margin-top: 6px;
 }
 
 .mktero-zotero-notes-list-view,

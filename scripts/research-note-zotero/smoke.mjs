@@ -563,20 +563,105 @@ export async function runSmoke(config) {
         state.continuationHintText = hintText;
         checks.push({ check: 'excerpt-continuation-hint-outside-native-editor', pdf: fixture.label,
             annotationKey: annotation.key, noteID: state.note.id, passed: true });
-        if (!state.continuationHintDismissed) {
-            await click(reader.root, '.mktero-note-continuation-dismiss', `${fixture.label} Dismiss continuation hint`);
-            await wait(() => hint.hidden, `${fixture.label} continuation hint hidden after dismiss`);
-            const afterDismiss = await waitForEditor(reader);
-            check(afterDismiss.editor === mounted.editor && afterDismiss.surface === mounted.surface,
-                'Dismissing the continuation hint replaced the native editor');
-            check(editorHasEvidence(afterDismiss, [annotation]), 'Dismissing the hint changed the inserted evidence');
-            check(!afterDismiss.surface.textContent.includes(hintText), 'Dismissing the hint inserted its text into the note');
-            state.continuationHintDismissed = true;
-            checks.push({ check: 'dismiss-continuation-hint-preserves-native-editor-and-note', pdf: fixture.label,
-                noteID: state.note.id, passed: true });
+        const prompts = hint.querySelector('.mktero-note-thinking-prompts');
+        const summary = prompts?.querySelector('summary');
+        const questions = [...(prompts?.querySelectorAll('li') || [])].map(node => node.textContent);
+        check(prompts && summary && !prompts.open && questions.length === 4,
+            'Thinking prompts must initially be collapsed with four questions');
+        check(!hint.querySelector('input, textarea, [contenteditable]'), 'Hint added an editable surface');
+        state.thinkingPromptText = [summary.textContent, ...questions];
+        const beforeThoughts = mounted.surface.textContent;
+        const caretBefore = noteCaret(mounted);
+        await click(reader.root, '.mktero-note-thinking-summary', `${fixture.label} Expand thinking prompts`);
+        check(prompts.open, 'Native thinking disclosure did not expand');
+        check(mounted.surface.textContent === beforeThoughts, 'Expanding prompts edited the note');
+        // The keyboard operates the disclosure, without sending focus back to the editor.
+        check(reader.root.activeElement === summary, 'Disclosure did not keep keyboard focus');
+        nativeKey(win, 'Enter');
+        await wait(() => !prompts.open, 'thinking prompts collapsed by keyboard');
+        nativeKey(win, 'Enter');
+        await wait(() => prompts.open, 'thinking prompts expanded by keyboard');
+        await recordThinkingLayout(reader);
+        if (!state.thinkingScreenshot) {
+            await captureWindow('phase-1-thinking-prompts-expanded');
+            // Zotero's main window has a native minimum height. Constrain the
+            // actual notes editor area to exercise the short-space layout even
+            // when the platform refuses to resize the top-level test window.
+            const editorView = reader.root.querySelector('.mktero-zotero-notes-editor-view');
+            editorView.style.maxHeight = '320px';
+            await recordThinkingLayout(reader, 'constrained-height-thinking-prompts');
+            await captureWindow('phase-1-thinking-prompts-constrained-height');
+            editorView.style.removeProperty('max-height');
+            state.thinkingScreenshot = true;
         }
+        await click(reader.root, '.mktero-note-continuation-dismiss', `${fixture.label} Dismiss continuation hint`);
+        await wait(() => hint.hidden && !prompts.open, `${fixture.label} continuation hint closed and reset`);
+        const afterDismiss = await waitForEditor(reader);
+        check(afterDismiss.editor === mounted.editor && afterDismiss.surface === mounted.surface,
+            'Thinking controls replaced the native editor');
+        check(mounted.surface.textContent === beforeThoughts, 'Thinking controls edited the note');
+        await wait(() => mounted.surface.ownerDocument.activeElement === mounted.surface,
+            'native editor focus after dismiss');
+        check(noteCaret(mounted) === caretBefore, 'Dismissing prompts moved the excerpt caret');
+        const thought = `My question after excerpt ${state.expectedEvidence.length + 1}: what could explain this result?`;
+        // Do not focus, set a selection, move the caret, or call an editor insert
+        // API here: type into precisely the focus/selection the product left.
+        const frameWindow = mounted.surface.ownerDocument.defaultView;
+        nativeKey(frameWindow, 'Enter');
+        for (const character of thought) nativeKey(frameWindow, character);
+        await wait(() => mounted.surface.textContent.includes(thought), 'natural native-keyboard continuation');
+        const paragraph = [...mounted.surface.querySelectorAll('p')].find(node => node.textContent === thought);
+        check(paragraph && !paragraph.querySelector('.highlight, .citation, [data-annotation]'),
+            'Typed thought is not a separate plain paragraph outside excerpt and citation');
+        state.userThoughts ||= [];
+        state.userThoughts.push(thought);
+        checks.push({ check: 'thinking-disclosure-keyboard-dismiss-and-natural-continuation', pdf: fixture.label,
+            noteID: state.note.id, sameEditor: true, restoredCaretOffset: caretBefore,
+            nativeKeyboardInput: true, thoughtOutsideExcerpt: true, passed: true });
+        if (state.userThoughts.length === 1) await captureWindow('phase-1-natural-continuation-after-dismiss');
         state.expectedEvidence.push({ label: fixture.label, quote: annotation.quote,
             annotationKey: annotation.key, attachmentURI: fixture.attachmentURI });
+    }
+
+    function nativeKey(targetWindow, key) {
+        const { classes: Cc, interfaces: Ci } = Components;
+        const input = Cc['@mozilla.org/text-input-processor;1'].createInstance(Ci.nsITextInputProcessor);
+        check(input.beginInputTransactionForTests(targetWindow, null), 'Native keyboard transaction unavailable');
+        const enter = key === 'Enter';
+        const code = enter ? 'Enter' : input.guessCodeValueOfPrintableKeyInUSEnglishKeyboardLayout(key);
+        const keyCode = enter ? 13 : input.guessKeyCodeValueOfPrintableKeyInUSEnglishKeyboardLayout(key);
+        const flags = enter ? Ci.nsITextInputProcessor.KEY_NON_PRINTABLE_KEY
+            : Ci.nsITextInputProcessor.KEY_FORCE_PRINTABLE_KEY;
+        const event = new targetWindow.KeyboardEvent('', { key, code, keyCode });
+        input.keydown(event, flags);
+        input.keyup(event, flags);
+    }
+
+    function noteCaret({ surface }) {
+        const selection = surface.ownerDocument.getSelection();
+        check(selection?.isCollapsed && surface.contains(selection.anchorNode),
+            'Expected a collapsed caret inside the native note');
+        const range = surface.ownerDocument.createRange();
+        range.selectNodeContents(surface);
+        range.setEnd(selection.anchorNode, selection.anchorOffset);
+        return range.toString().length;
+    }
+
+    async function recordThinkingLayout(reader, label = 'expanded-thinking-prompts-' + reader.label) {
+        const hint = reader.root.querySelector('.mktero-note-continuation-hint');
+        const slot = reader.root.querySelector('.mktero-zotero-note-slot');
+        const view = reader.root.querySelector('.mktero-zotero-notes-editor-view');
+        const hintRect = hint.getBoundingClientRect();
+        const viewRect = view.getBoundingClientRect();
+        const editorRect = slot.getBoundingClientRect();
+        const layout = { phase: config.phase, label,
+            width: hintRect.width, clientWidth: hint.clientWidth, scrollWidth: hint.scrollWidth,
+            height: hintRect.height, editorHeight: editorRect.height, viewHeight: viewRect.height };
+        layouts.push(layout);
+        check(hint.scrollWidth <= hint.clientWidth + 1, 'Thinking prompts overflow the notes column');
+        check(hintRect.height <= viewRect.height * 0.4 + 1 && editorRect.height > viewRect.height * 0.4,
+            'Expanded thinking prompts leave too little room for native writing');
+        await writeJSON(config.run + `/phase-${config.phase}.layouts.json`, layouts);
     }
 
     async function leaveEditor(reader) {
@@ -596,6 +681,14 @@ export async function runSmoke(config) {
             'Missing continuation hint text for saved-content verification');
         check(!html.includes(state.continuationHintText) && !text.includes(state.continuationHintText)
             && !parsed.querySelector('.mktero-note-continuation-hint'), 'Continuation hint was saved into note HTML');
+        for (const prompt of state.thinkingPromptText || []) {
+            check(!text.includes(prompt), 'A thinking prompt was saved into the note');
+        }
+        for (const thought of state.userThoughts || []) {
+            const paragraphs = [...parsed.querySelectorAll('p')].filter(node => node.textContent === thought);
+            check(paragraphs.length === 1 && !paragraphs[0].querySelector('.highlight, .citation, [data-annotation]'),
+                'A naturally typed thought was lost, duplicated or saved inside an excerpt');
+        }
         check(text.includes(state.note.seed), 'Standalone note seed was lost');
         const annotations = [...parsed.querySelectorAll('[data-annotation]')]
             .map(node => JSON.parse(decodeURIComponent(node.getAttribute('data-annotation'))));

@@ -8,15 +8,17 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 const research = { id: 8, key: 'QUESTION', libraryID: 1, kind: 'standalone', title: 'Why does this happen?', editable: true };
 const local = { id: 9, key: 'LOCAL123', libraryID: 1, kind: 'item', title: 'Paper notes', editable: true };
 
-function fixture(shared = { key: null }) {
+function fixture(shared = { key: null }, zoteroLocale = 'en-US') {
     const { document } = parseHTML('<html><body></body></html>');
     const host = document.createElement('div');
     const aside = document.createElement('aside');
     document.body.append(host, aside);
-    const localization = createLocalization();
+    const localization = createLocalization({ zoteroLocale });
     const errors = [];
     const mounted = [];
     const inserted = [];
+    const focused = [];
+    const destroyed = [];
     const listeners = new Set();
     const target = () => shared.key ? { status: 'ready', note: research, key: shared.key } : { status: 'none' };
     const adapter = {
@@ -41,14 +43,15 @@ function fixture(shared = { key: null }) {
             const note = noteID === research.id ? research : local;
             return { noteID, title: note.title, editable: true,
                 insertAnnotations: async annotations => inserted.push({ noteID, annotations }),
-                destroy() {} };
+                focus: () => focused.push(noteID),
+                destroy: () => destroyed.push(noteID) };
         },
         observe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
     };
     const panel = createZoteroNotesPanel({ document, host, aside,
         translate: localization.t.bind(localization), onError: error => errors.push(error) });
     panel.setAdapter(adapter);
-    return { panel, aside, adapter, mounted, inserted, errors, shared };
+    return { panel, aside, adapter, mounted, inserted, focused, destroyed, errors, shared };
 }
 
 test('the initial setup creates, pins and opens a research note only after creation succeeds', async () => {
@@ -193,6 +196,71 @@ test('a successful excerpt shows a dismissible writing hint outside the editor w
     f.panel.back();
     await f.panel.openNote(research.id);
     assert.equal(hint.hidden, true);
+    f.panel.destroy();
+});
+
+test('thinking prompts are optional, bilingual and outside the unchanged native editor', async () => {
+    for (const [locale, label, question] of [
+        ['en-US', 'Thinking prompts', 'What assumptions are implicit here?'],
+        ['zh-CN', '思考角度', '这里有哪些隐含假设？'],
+    ]) {
+        const f = fixture({ key: research.key }, locale);
+        await flush();
+        const destination = await f.panel.prepareInsert();
+        const handle = f.panel.handle;
+        const annotations = [{ text: 'Evidence from the paper' }];
+        await destination.insertAnnotations(annotations);
+        const hint = f.aside.querySelector('.mktero-note-continuation-hint');
+        const details = hint.querySelector('details');
+        assert.ok(details, 'the writing hint has a native disclosure');
+        assert.equal(details.hasAttribute('open'), false);
+        assert.equal(details.querySelector('summary').textContent, label);
+        assert.equal(details.querySelectorAll('li').length, 4);
+        assert.equal(details.querySelector('li').textContent, question);
+        assert.equal(details.querySelector('input, textarea, [contenteditable], button'), null);
+        // linkedom does not implement the native summary click default action.
+        details.setAttribute('open', '');
+        await f.panel.refresh();
+        f.panel.syncLocalization();
+        assert.equal(details.hasAttribute('open'), true, 'refresh keeps the user choice');
+        await f.panel.insertAnnotations(annotations);
+        assert.equal(details.hasAttribute('open'), true, 'a later excerpt keeps the user choice');
+        assert.equal(f.panel.handle, handle);
+        assert.deepEqual(f.mounted, [research.id]);
+        assert.deepEqual(f.destroyed, []);
+        assert.deepEqual(f.focused, [], 'showing prompts does not refocus the editor');
+        assert.deepEqual(f.inserted, [
+            { noteID: research.id, annotations }, { noteID: research.id, annotations },
+        ]);
+        f.aside.querySelector('.mktero-note-continuation-dismiss').click();
+        assert.equal(hint.hidden, true);
+        assert.equal(details.hasAttribute('open'), false);
+        assert.deepEqual(f.focused, [research.id]);
+        assert.equal(f.panel.handle, handle);
+        await destination.insertAnnotations(annotations);
+        assert.equal(hint.hidden, false);
+        assert.equal(details.hasAttribute('open'), false, 'dismissed prompts reappear collapsed');
+        f.panel.destroy();
+    }
+});
+
+test('closing or replacing the native editor resets thinking prompts', async () => {
+    const f = fixture({ key: research.key });
+    await flush();
+    const details = f.aside.querySelector('.mktero-note-continuation-hint details');
+    assert.ok(details);
+    for (const change of [
+        () => f.panel.openNote(local.id),
+        async () => { f.panel.back(); await f.panel.openNote(local.id); },
+        async () => { f.panel.setAdapter(null); f.panel.setAdapter(f.adapter); await flush(); },
+    ]) {
+        if (!f.panel.canInsert) await f.panel.openNote(local.id);
+        await f.panel.insertAnnotations([{ text: 'Another excerpt' }]);
+        details.setAttribute('open', '');
+        await change();
+        assert.equal(details.hasAttribute('open'), false);
+        assert.equal(f.aside.querySelector('.mktero-note-continuation-hint').hidden, true);
+    }
     f.panel.destroy();
 });
 

@@ -99,6 +99,9 @@ try {
             'extensions.update.enabled': false, 'extensions.getAddons.cache.enabled': false,
             'extensions.logging.enabled': true, 'browser.dom.window.dump.enabled': true,
             'devtools.console.stdout.chrome': true,
+            // Gecko's own automation uses this to exercise native key defaults
+            // in a background window without activating the user's desktop.
+            'focusmanager.testmode': true,
             // Seatbelt remains the network boundary; Gecko's socket-process
             // sandbox cannot stack with this enclosing macOS policy.
             'network.process.enabled': false,

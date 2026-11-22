@@ -59,7 +59,18 @@ Open a note in the `Notes` column, including a standalone note if that is your t
 
 The passage is inserted the same way as in Zotero's PDF reader: highlighted text, a citation, and the page. Clicking that citation opens Zotero's PDF reader. Adding an ordinary selection does not save a highlight.
 
-After a successful `Add to Note`, a dismissible prompt appears outside the editor: `Excerpt added. You can now write your questions, critiques or connections.` Continue writing directly in Zotero's native note editor; there is no extra input box, template, category, or AI step. The prompt stays out of the note's content and does not change the editor's cursor behavior.
+After a successful `Add to Note`, a dismissible prompt appears outside the editor: `Excerpt added. You can now write your questions, critiques or connections.` Simply selecting text does not show it.
+
+You can expand the initially collapsed thinking prompts for four starting points:
+
+- What assumptions are implicit here?
+- Would the result still hold with a different method or control?
+- Which paper does this remind me of, and why?
+- What do I still not understand or agree with?
+
+Continue writing directly in Zotero's native note editor; there is no extra input box, template, category, or AI step. The success message and these static questions stay out of the note's content. Expanding or collapsing them does not edit the note.
+
+Adding another passage in the same open editor preserves your expanded or collapsed choice. Dismissing the whole prompt clears that choice; the next successful `Add to Note` shows it collapsed again. Closing or switching the note editor also clears the state. You can collapse or dismiss the prompt at any time and continue reading or writing.
 
 Insertion needs an editable target note and a PDF position. With a valid pinned research note, Mktero opens its editor on demand before inserting. A local highlight not yet in the PDF, or a selection the local PDF index cannot locate (not found or ambiguous), is refused with the reason; Mktero does not insert it without a source.
 
