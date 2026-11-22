@@ -9,6 +9,7 @@ import {
     NOTE_ANNOTATION_NOT_IN_PDF,
     NOTE_EDITOR_UNAVAILABLE,
     NOTE_NO_PARENT_ITEM,
+    NOTE_TARGET_CHANGED,
     noteBridgeError,
     NOTES_UNAVAILABLE,
     summarizeNoteHTML,
@@ -33,6 +34,8 @@ const EDITOR_INSTANCE_POLL_MS = 25;
 // An insert reaches the note editor as a message; past this the caret is
 // left where the editor put it.
 const NOTE_CARET_WAIT_MS = 2_000;
+// Tabs can have separate services, but only one creation may run per library.
+const researchNoteCreations = new WeakMap();
 
 // Zotero notes shown beside the paper a Mktero tab displays. The list has
 // two scopes: notes attached to the current paper, and standalone notes in
@@ -195,6 +198,71 @@ export function createZoteroNotes(zotero, {
 
     return {
         getResearchNote,
+
+        async createResearchNote(attachmentID, { title = '' } = {}) {
+            const attachment = attachmentFor(attachmentID);
+            const libraryID = attachment?.libraryID;
+            if (!Number.isSafeInteger(libraryID) || libraryID <= 0
+                || !zotero?.Libraries?.get?.(libraryID)) {
+                throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The source library is unavailable');
+            }
+            if (typeof title !== 'string') {
+                throw new TypeError('The research note title must be text');
+            }
+            const originalTarget = getResearchNoteTarget(zotero, libraryID);
+            const creating = researchNoteCreations.get(zotero) || new Set();
+            if (creating.has(libraryID)) {
+                throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'A research note is already being created in this library');
+            }
+            researchNoteCreations.set(zotero, creating);
+            creating.add(libraryID);
+            let stopTargetObserver = () => {};
+            try {
+                let targetChanged = false;
+                stopTargetObserver = observeResearchNoteTargets(zotero, () => {
+                    try {
+                        if (getResearchNoteTarget(zotero, libraryID) !== originalTarget) {
+                            targetChanged = true;
+                        }
+                    }
+                    catch {
+                        targetChanged = true;
+                    }
+                });
+                const note = newNote(zotero, { attachment, kind: 'standalone' });
+                if (!noteEditable(zotero, note)) {
+                    throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The note is read-only');
+                }
+                const text = title.replaceAll('&', '&amp;')
+                    .replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+                    .replaceAll('"', '&quot;').replaceAll('\'', '&#39;');
+                note.setNote(`<p>${text}</p>`);
+                await note.saveTx();
+                if (!Number.isSafeInteger(note.id) || note.id <= 0 || !note.key) {
+                    throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The note was not saved');
+                }
+                const saved = await existingNoteFor(attachmentID, note.id);
+                const source = attachmentFor(attachmentID);
+                if (!source || source.deleted || source.libraryID !== libraryID
+                    || !zotero?.Libraries?.get?.(libraryID)
+                    || saved.id !== note.id || saved.libraryID !== libraryID
+                    || saved.key !== note.key || saved.parentID
+                    || !noteEditable(zotero, saved)) {
+                    throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The source or note is no longer available for research notes');
+                }
+                if (targetChanged || getResearchNoteTarget(zotero, libraryID) !== originalTarget) {
+                    throw noteBridgeError(NOTE_TARGET_CHANGED, 'The research note destination changed');
+                }
+                setResearchNoteTarget(zotero, libraryID, saved.key);
+                scheduleNotify();
+                return { noteID: saved.id };
+            }
+            finally {
+                stopTargetObserver();
+                creating.delete(libraryID);
+                if (!creating.size) researchNoteCreations.delete(zotero);
+            }
+        },
 
         async pinResearchNote(attachmentID, noteID) {
             const item = await existingNoteFor(attachmentID, noteID);

@@ -2820,6 +2820,7 @@ function createTabNotesBridge(getAttachmentID) {
             const id = getAttachmentID();
             return id ? notes.getResearchNote(id) : { status: 'unavailable' };
         },
+        createResearchNote: logged((options = {}) => notes.createResearchNote(attachmentID(), options)),
         pinResearchNote: logged(noteID => notes.pinResearchNote(attachmentID(), noteID)),
         clearResearchNote: logged(() => notes.clearResearchNote(attachmentID())),
         canHostEditor: context => notes.canHostEditor(context),

@@ -39,12 +39,17 @@ Both kinds are normal Zotero note items. Zotero handles their sync, search, and 
 
 A research note is an ordinary standalone Zotero note that you choose as the target for passages from several papers. Each library has its own choice.
 
-1. In `Standalone notes`, click the pin button on an editable note's card to set it as the research note. Create a standalone note first if needed; its title can be the question you are exploring. Pinning keeps the list open and does not open the editor. You can also right-click the note and choose `Set as Research Note`, or use the pin button above an already open standalone note.
-2. Click the pinned title in the research-note strip to continue editing. The same target appears in other Mktero reading tabs for that library. You can also choose `Add to Note` on an original-text selection or an annotation to open that target and insert the passage. Check the target title shown by the action before adding it.
-3. Write your question, critique, or connection beside the inserted passage in Zotero's note editor. The citation and page link let you return to the PDF source.
-4. After restarting Zotero, open a paper in that library to continue with the saved research-note target. The editor opens when you choose to continue or add a passage; restoring the target does not restore reading tabs.
+When no research note is set, the `Notes` column explains how to use one across papers and offers `Create research note` and `Choose existing note`.
 
-Opening a different note changes the target in that reading tab only. It does not replace the pinned research note; click the pinned title in the research-note strip when you want to return to it. To change the pinned target, return to `Standalone notes` and click another note's card pin. Click the selected card's pin again, or use `Unpin Research Note` in the strip, to clear the choice and keep the note and its contents. If the destination changes while an Add to Note popup is open, that old action is refused; close the popup and select the content again.
+1. Choose `Create research note` to create an ordinary standalone Zotero note in the same library, titled `Research note` by default. Once saved, it is pinned and opened in Zotero's native note editor, where you can change its title.
+2. Choose `Choose existing note` to enter a selection mode for standalone notes in the same library. Click an editable note to pin and open it, or cancel.
+3. Click the pinned title in the research-note strip to continue editing. The same target appears in other Mktero reading tabs for that library. You can also choose `Add to Note` on an original-text selection or an annotation to open that target and insert the passage. Check the target title shown by the action before adding it.
+4. Write your question, critique, or connection beside the inserted passage in Zotero's note editor. The citation and page link let you return to the PDF source.
+5. After restarting Zotero, open a paper in that library to continue with the saved research-note target. The editor opens when you choose to continue or add a passage; restoring the target does not restore reading tabs.
+
+You can still set an editable standalone note as the research note using its card's pin button, the right-click action `Set as Research Note`, or the pin button above its open editor. Pinning from a card keeps the list open and does not open the editor.
+
+Opening a different note changes the target in that reading tab only. It does not replace the pinned research note; click the pinned title in the research-note strip when you want to return to it. To change the pinned target, choose `Change research note` in the strip to enter the same selection mode, or return to `Standalone notes` and click another note's card pin. Cancelling selection keeps the current target. Click the selected card's pin again, or use `Unpin Research Note` in the strip, to clear the choice and keep the note and its contents. If the destination changes while an Add to Note popup is open, that old action is refused; close the popup and select the content again.
 
 A deleted note, a note moved under a paper, or a note that is no longer editable cannot receive passages as the research-note target. Mktero shows the reason so you can restore access, choose another note, or clear the choice; it does not silently write to another note.
 
@@ -53,6 +58,8 @@ A deleted note, a note moved under a paper, or a note that is no longer editable
 Open a note in the `Notes` column, including a standalone note if that is your target, or use the pinned research note. Then choose `Add to Note` from a text-selection popup, an annotation popup, or an item in the `Annotations` segment. The action identifies the actual target note; if another note is already open, it receives the passage.
 
 The passage is inserted the same way as in Zotero's PDF reader: highlighted text, a citation, and the page. Clicking that citation opens Zotero's PDF reader. Adding an ordinary selection does not save a highlight.
+
+After a successful `Add to Note`, a dismissible prompt appears outside the editor: `Excerpt added. You can now write your questions, critiques or connections.` Continue writing directly in Zotero's native note editor; there is no extra input box, template, category, or AI step. The prompt stays out of the note's content and does not change the editor's cursor behavior.
 
 Insertion needs an editable target note and a PDF position. With a valid pinned research note, Mktero opens its editor on demand before inserting. A local highlight not yet in the PDF, or a selection the local PDF index cannot locate (not found or ambiguous), is refused with the reason; Mktero does not insert it without a source.
 

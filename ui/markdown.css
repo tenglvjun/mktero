@@ -1117,6 +1117,82 @@ main {
     font-size: 12px;
     line-height: 1.45;
 }
+.mktero-research-note-setup,
+.mktero-research-note-picker {
+    flex: 0 0 auto;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.mktero-research-note-help {
+    margin: 0 0 8px;
+    color: var(--text);
+    font: 12px/1.5 var(--ui-font);
+    overflow-wrap: anywhere;
+}
+
+.mktero-research-note-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+}
+
+.mktero-research-note-action,
+.mktero-research-note-text-action {
+    max-width: 100%;
+    padding: 5px 7px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--text);
+    background: var(--surface-raised);
+    font: 12px/1.4 var(--ui-font);
+    text-align: start;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+}
+
+.mktero-research-note-text-action {
+    border-color: transparent;
+    background: transparent;
+}
+
+.mktero-research-note-action:hover:not(:disabled),
+.mktero-research-note-text-action:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 8%, var(--surface-raised));
+}
+
+.mktero-research-note-action:focus-visible,
+.mktero-research-note-text-action:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+}
+
+.mktero-research-note-action:disabled,
+.mktero-research-note-text-action:disabled,
+.mktero-zotero-note-link:disabled {
+    cursor: default;
+    opacity: 0.55;
+}
+
+.mktero-note-continuation-hint {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: start;
+    gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text);
+    background: var(--surface);
+    font: 12px/1.5 var(--ui-font);
+}
+
+.mktero-note-continuation-text {
+    min-width: 0;
+    flex: 1;
+    overflow-wrap: anywhere;
+}
+
 .mktero-zotero-notes-list-view,
 .mktero-zotero-notes-editor-view {
     display: flex;
