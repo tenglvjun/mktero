@@ -100,6 +100,74 @@ export async function runSmoke(config) {
         await verifyFixtureItems();
 
         const a = await openPDF(state.pdfs[0]);
+        await stage('A: inspecting research-note setup and cancelling the standalone-note picker');
+        await waitForSetup(a);
+        const targetsBeforeSetup = JSON.stringify(readTargets());
+        const noteHTMLBeforeSetup = await savedHTML();
+        await captureWindow('phase-1-research-note-setup-A');
+        await noAutomaticEditor(a, async () => {
+            await click(a.root, '.mktero-research-note-choose', 'A Choose research note');
+            await waitForResearchPicker(a);
+            check(JSON.stringify(readTargets()) === targetsBeforeSetup, 'Opening the picker changed the research target');
+            await click(a.root, '.mktero-research-note-cancel', 'A Cancel research note choice');
+            await waitForSetup(a);
+            check(a.root.querySelector('.mktero-research-note-picker').hidden, 'Cancelling did not hide the note picker');
+            check(JSON.stringify(readTargets()) === targetsBeforeSetup, 'Cancelling the picker changed the research target');
+        });
+        check((await savedHTML()) === noteHTMLBeforeSetup, 'Cancelling research-note choice changed the fixture note content');
+        checks.push({ check: 'research-setup-choose-cancel-without-target-or-editor', pdf: 'A',
+            visibleStandaloneNote: state.note.title, createEnabled: true, chooseEnabled: true, passed: true });
+
+        await stage('A: creating an ordinary standalone research note via its native Create button');
+        await click(a.root, '.mktero-research-note-create', 'A Create research note');
+        const createdNote = await wait(async () => {
+            const added = (await allItems()).filter(item => item.isNote() && item.id !== state.note.id);
+            check(added.length <= 1, 'Create research note created multiple notes');
+            return added[0];
+        }, 'new ordinary standalone Zotero note');
+        check(createdNote.id && createdNote.key && !createdNote.parentID && !createdNote.deleted
+            && createdNote.libraryID === libraryID, 'Created research note is not an ordinary standalone note');
+        await Zotero.Items.loadDataTypes([createdNote], ['note']);
+        check(createdNote.getNoteTitle() === 'Research note', 'Created research note has the wrong default title');
+        state.createdNote = { id: createdNote.id, key: createdNote.key, title: 'Research note' };
+        await writeJSON(config.statePath, state);
+        await wait(() => readTargets()[String(libraryID)] === state.createdNote.key,
+            'created research note key in preferences');
+        await waitForTarget(a, state.createdNote);
+        const createdEditor = await waitForEditor(a, state.createdNote);
+        check(createdEditor.surface.textContent.trim() === state.createdNote.title,
+            'Created note editor does not contain only the editable default title');
+        await captureWindow('phase-1-created-research-note-A');
+        await leaveEditor(a);
+        await clearTarget(a);
+        // Snapshot after the native editor's first save, which may normalize
+        // note HTML. Later insertion and restart must leave this note alone.
+        state.createdNote.contentHTML = await savedHTML(state.createdNote.id);
+        check(typeof state.createdNote.contentHTML === 'string'
+            && new win.DOMParser().parseFromString(state.createdNote.contentHTML, 'text/html')
+                .body.textContent.trim() === state.createdNote.title,
+        'Created research note was not saved with only its default title');
+        await writeJSON(config.statePath, state);
+        await verifyFixtureItems();
+        checks.push({ check: 'create-research-note-via-control-and-clear-without-deletion', pdf: 'A',
+            noteID: state.createdNote.id, noteKey: state.createdNote.key, title: state.createdNote.title,
+            ordinaryStandaloneNote: true, mountedEditor: true, passed: true });
+
+        await stage('A: choosing the fixture note to pin and open it, then clearing the target');
+        await click(a.root, '.mktero-research-note-choose', 'A Choose existing research note');
+        await waitForResearchPicker(a);
+        await click(a.root, `.mktero-zotero-note-link[data-note-id="${state.note.id}"]`,
+            'A standalone fixture note in research-note picker');
+        await wait(() => readTargets()[String(libraryID)] === state.note.key, 'chosen fixture note key in preferences');
+        await waitForTarget(a);
+        await waitForEditor(a);
+        check(a.root.querySelector('.mktero-research-note-picker').hidden, 'Selecting a note did not close the picker');
+        await leaveEditor(a);
+        await clearTarget(a);
+        await verifyFixtureItems();
+        checks.push({ check: 'choose-research-note-pins-and-opens-fixture-note', pdf: 'A',
+            noteID: state.note.id, noteKey: state.note.key, clearedBeforeCardPinSequence: true, passed: true });
+
         await stage('A: pinning a standalone note from its card without opening an editor');
         await click(a.root, '[data-note-scope="standalone"]', 'standalone notes scope');
         const noteHTMLBeforePin = await savedHTML();
@@ -224,6 +292,8 @@ export async function runSmoke(config) {
     check(Services.io.offline, 'Gecko went online during validation');
     return { mode: 'installed-product-xpi', ...base, productVersion: addon.version,
         xpiSHA256: config.product.sha256, noteID: state.note.id, noteKey: state.note.key,
+        createdNote: state.createdNote && { id: state.createdNote.id, key: state.createdNote.key,
+            title: state.createdNote.title },
         pdfIDs: state.pdfs.map(({ label, id, key }) => ({ label, id, key })), checks, layouts, screenshots };
 
     function readTargets() {
@@ -238,7 +308,20 @@ export async function runSmoke(config) {
         await Zotero.Items.loadDataTypes([note], ['note']);
         check(note.getNoteTitle() === state.note.title, 'Standalone note title was changed by insertion');
         const notes = (await allItems()).filter(item => item.isNote());
-        check(notes.length === 1 && notes[0].id === note.id, 'Insertion created or selected another note');
+        const expectedNoteIDs = [note.id];
+        if (state.createdNote) {
+            const created = await Zotero.Items.getAsync(state.createdNote.id);
+            check(created?.isNote() && !created.deleted && !created.parentID && created.libraryID === libraryID
+                && created.key === state.createdNote.key, 'Created ordinary standalone research note was lost or changed');
+            await Zotero.Items.loadDataTypes([created], ['note']);
+            check(created.getNoteTitle() === state.createdNote.title, 'Created research note title was changed');
+            check(typeof state.createdNote.contentHTML === 'string'
+                && (await savedHTML(created.id)) === state.createdNote.contentHTML,
+            'Insertion or restart changed the separately created research note content');
+            expectedNoteIDs.push(created.id);
+        }
+        check(notes.length === expectedNoteIDs.length && notes.every(item => expectedNoteIDs.includes(item.id)),
+            'Insertion created or selected an unexpected note');
         check(state.pdfs.length === 2 && state.pdfs[0].id !== state.pdfs[1].id, 'Expected two distinct PDF attachments');
         for (const fixture of state.pdfs) {
             const pdf = await Zotero.Items.getAsync(fixture.id);
@@ -277,7 +360,7 @@ export async function runSmoke(config) {
         }
         await click(root, '#mktero-outline-segment-annotations', 'Annotations sidebar segment');
         check(!root.querySelector('.mktero-research-note-change'),
-            `${reader.label}: removed research-note change control is still present`);
+            `${reader.label}: legacy research-note change class is still present`);
         checks.push({ check: 'research-strip-change-control-absent', pdf: reader.label, passed: true });
         return reader;
     }
@@ -338,15 +421,52 @@ export async function runSmoke(config) {
         });
     }
 
-    async function waitForTarget(reader) {
+    async function waitForSetup(reader) {
+        await wait(() => {
+            const setup = reader.root.querySelector('.mktero-research-note-setup');
+            const create = setup?.querySelector('.mktero-research-note-create');
+            const choose = setup?.querySelector('.mktero-research-note-choose');
+            return visible(setup) && visible(create) && !create.disabled && visible(choose) && !choose.disabled;
+        }, `${reader.label} unpinned research-note setup with enabled Create and Choose`);
+        check(readTargets()[String(libraryID)] === undefined, `${reader.label}: setup appeared with a research target`);
+        check(!visible(reader.root.querySelector('.mktero-research-note')),
+            `${reader.label}: research strip is visible without a target`);
+    }
+
+    async function waitForResearchPicker(reader) {
+        await wait(() => {
+            const picker = reader.root.querySelector('.mktero-research-note-picker');
+            const link = reader.root.querySelector(`.mktero-zotero-note-link[data-note-id="${state.note.id}"]`);
+            const title = link?.querySelector('.mktero-zotero-note-title');
+            return visible(picker) && visible(link) && !link.disabled
+                && visible(title) && title.textContent === state.note.title;
+        }, `${reader.label} research-note picker naming the standalone fixture note`);
+        check(reader.root.querySelector('[data-note-scope="standalone"]').getAttribute('aria-selected') === 'true'
+            && reader.root.querySelector('.mktero-zotero-notes-list').getAttribute('aria-labelledby')
+                === 'mktero-zotero-notes-tab-standalone',
+        `${reader.label}: research-note picker is not showing standalone notes`);
+        check(reader.root.querySelector('.mktero-research-note-setup').hidden,
+            `${reader.label}: setup remains visible while choosing a note`);
+    }
+
+    async function clearTarget(reader) {
+        await noAutomaticEditor(reader, async () => {
+            await click(reader.root, '.mktero-research-note-clear', `${reader.label} Clear research note`);
+            await wait(() => readTargets()[String(libraryID)] === undefined,
+                `${reader.label} cleared research target in preferences`);
+            await waitForSetup(reader);
+        });
+    }
+
+    async function waitForTarget(reader, note = state.note) {
         await wait(() => {
             const strip = reader.root.querySelector('.mktero-research-note');
             const title = strip?.querySelector('.mktero-research-note-title');
             const button = strip?.querySelector('.mktero-research-note-continue');
-            return visible(strip) && title?.textContent === state.note.title && button && !button.disabled;
+            return visible(strip) && title?.textContent === note.title && button && !button.disabled;
         }, `${reader.label} research strip naming the pinned note`);
         check(!reader.root.querySelector('.mktero-research-note-change'),
-            `${reader.label}: removed research-note change control is still present`);
+            `${reader.label}: legacy research-note change class is still present`);
     }
 
     async function noAutomaticEditor(reader, action = async () => {}) {
@@ -376,19 +496,19 @@ export async function runSmoke(config) {
         }
     }
 
-    async function waitForEditor(reader) {
+    async function waitForEditor(reader, note = state.note) {
         return wait(() => {
             const editor = reader.root.host.querySelector('note-editor');
             const instance = editor?.getCurrentInstance?.();
             const frame = editor?._iframe || editor?.querySelector('#editor-view') || editor?.querySelector('iframe');
             const surface = frame?.contentDocument?.querySelector('.ProseMirror');
             if (!instance || !visible(editor) || !surface) return null;
-            check(editor.item?.id === state.note.id && editor.item?.key === state.note.key,
+            check(editor.item?.id === note.id && editor.item?.key === note.key,
                 `${reader.label}: editor mounted a different note`);
             const destination = reader.root.querySelector('.mktero-note-destination');
-            if (!visible(destination) || !destination.textContent.includes(state.note.title)) return null;
+            if (!visible(destination) || !destination.textContent.includes(note.title)) return null;
             return { editor, surface, destination: destination.textContent };
-        }, `${reader.label} native Zotero note editor for note ${state.note.id}`);
+        }, `${reader.label} native Zotero note editor for note ${note.id}`);
     }
 
     async function moveCaretToEnd({ surface }) {
@@ -430,6 +550,31 @@ export async function runSmoke(config) {
         await click(reader.root, selector, `${fixture.label} saved PDF annotation Add to Note`);
         const mounted = await waitForEditor(reader);
         await wait(() => editorHasEvidence(mounted, [annotation]), `${fixture.label} evidence in the pinned note editor`);
+        const hint = await wait(() => {
+            const node = reader.root.querySelector('.mktero-note-continuation-hint');
+            return visible(node) && node;
+        }, `${fixture.label} continuation hint after Add to Note`);
+        const hintText = hint.querySelector('.mktero-note-continuation-text')?.textContent.trim();
+        check(hintText, `${fixture.label}: continuation hint has no text`);
+        check(!mounted.surface.textContent.includes(hintText), `${fixture.label}: continuation hint leaked into the native editor`);
+        if (state.continuationHintText) {
+            check(hintText === state.continuationHintText, 'Continuation hint text changed between insertions');
+        }
+        state.continuationHintText = hintText;
+        checks.push({ check: 'excerpt-continuation-hint-outside-native-editor', pdf: fixture.label,
+            annotationKey: annotation.key, noteID: state.note.id, passed: true });
+        if (!state.continuationHintDismissed) {
+            await click(reader.root, '.mktero-note-continuation-dismiss', `${fixture.label} Dismiss continuation hint`);
+            await wait(() => hint.hidden, `${fixture.label} continuation hint hidden after dismiss`);
+            const afterDismiss = await waitForEditor(reader);
+            check(afterDismiss.editor === mounted.editor && afterDismiss.surface === mounted.surface,
+                'Dismissing the continuation hint replaced the native editor');
+            check(editorHasEvidence(afterDismiss, [annotation]), 'Dismissing the hint changed the inserted evidence');
+            check(!afterDismiss.surface.textContent.includes(hintText), 'Dismissing the hint inserted its text into the note');
+            state.continuationHintDismissed = true;
+            checks.push({ check: 'dismiss-continuation-hint-preserves-native-editor-and-note', pdf: fixture.label,
+                noteID: state.note.id, passed: true });
+        }
         state.expectedEvidence.push({ label: fixture.label, quote: annotation.quote,
             annotationKey: annotation.key, attachmentURI: fixture.attachmentURI });
     }
@@ -439,14 +584,18 @@ export async function runSmoke(config) {
         await wait(() => !reader.root.host.querySelector('note-editor'), 'native editor cleanup');
     }
 
-    async function savedHTML() {
-        return Zotero.DB.valueQueryAsync('SELECT note FROM itemNotes WHERE itemID = ?', [state.note.id]);
+    async function savedHTML(noteID = state.note.id) {
+        return Zotero.DB.valueQueryAsync('SELECT note FROM itemNotes WHERE itemID = ?', [noteID]);
     }
 
     function checkEvidence(html, evidence = state.expectedEvidence) {
         check(typeof html === 'string', 'Standalone note is missing from the database');
         const parsed = new win.DOMParser().parseFromString(html, 'text/html');
         const text = parsed.body.textContent;
+        check(typeof state.continuationHintText === 'string' && state.continuationHintText,
+            'Missing continuation hint text for saved-content verification');
+        check(!html.includes(state.continuationHintText) && !text.includes(state.continuationHintText)
+            && !parsed.querySelector('.mktero-note-continuation-hint'), 'Continuation hint was saved into note HTML');
         check(text.includes(state.note.seed), 'Standalone note seed was lost');
         const annotations = [...parsed.querySelectorAll('[data-annotation]')]
             .map(node => JSON.parse(decodeURIComponent(node.getAttribute('data-annotation'))));

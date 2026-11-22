@@ -70,6 +70,9 @@ class ZoteroNotesPanel {
         this.mode = 'list';
         this.handle = null;
         this.openingNote = false;
+        this.researchActionPending = false;
+        this.choosingResearchNote = false;
+        this.continuationHintVisible = false;
         // Bumped whenever the open editor is closed, so a mount that finishes
         // after the reader went back (or switched adapter) is discarded.
         this.editorToken = 0;
@@ -123,6 +126,64 @@ class ZoteroNotesPanel {
         await this.refresh();
     }
 
+    async createResearchNote() {
+        const adapter = this.adapter;
+        if (!adapter?.createResearchNote || !this.state.canCreateStandaloneNote
+            || this.openingNote || this.researchActionPending) return;
+        const token = this.editorToken;
+        this.researchActionPending = true;
+        this.render();
+        try {
+            const result = await adapter.createResearchNote({ title: this.t('notes.researchNote') });
+            if (this.destroyed || adapter !== this.adapter || token !== this.editorToken) return;
+            if (!result?.noteID) throw unavailableNote();
+            this.choosingResearchNote = false;
+            await this.refresh();
+            if (this.destroyed || adapter !== this.adapter || token !== this.editorToken) return;
+            await this.openNote(result.noteID);
+        }
+        finally {
+            if (adapter === this.adapter && !this.destroyed) {
+                this.researchActionPending = false;
+                this.render();
+            }
+        }
+    }
+
+    chooseResearchNote() {
+        if (!this.adapter?.pinResearchNote || this.openingNote || this.researchActionPending) return;
+        this.closeEditor();
+        this.choosingResearchNote = true;
+        this.noteScope = 'standalone';
+        this.noteQuery = '';
+        this.elements.searchInput.value = '';
+        this.syncNoteScopeButtons();
+        this.render();
+        if (!this.elements.search.hidden) this.elements.searchInput.focus();
+    }
+
+    async selectResearchNote(noteID) {
+        const adapter = this.adapter;
+        if (!adapter?.pinResearchNote || this.researchActionPending) return;
+        const token = this.editorToken;
+        this.researchActionPending = true;
+        this.render();
+        try {
+            await adapter.pinResearchNote(noteID);
+            if (this.destroyed || adapter !== this.adapter || token !== this.editorToken) return;
+            this.choosingResearchNote = false;
+            await this.refresh();
+            if (this.destroyed || adapter !== this.adapter || token !== this.editorToken) return;
+            await this.openNote(noteID);
+        }
+        finally {
+            if (adapter === this.adapter && !this.destroyed) {
+                this.researchActionPending = false;
+                this.render();
+            }
+        }
+    }
+
     async clearResearchNote() {
         if (!this.adapter?.clearResearchNote) return;
         await this.adapter.clearResearchNote();
@@ -159,7 +220,14 @@ class ZoteroNotesPanel {
                     || this.editorToken !== token || !handle.editable || handle.isGone?.()) {
                     throw unavailableNote();
                 }
+                this.continuationHintVisible = false;
+                this.renderContinuationHint();
                 await handle.insertAnnotations(annotations, options);
+                if (!this.destroyed && this.handle === handle && this.adapter === adapter
+                    && this.editorToken === token && handle.editable && !handle.isGone?.()) {
+                    this.continuationHintVisible = true;
+                    this.renderContinuationHint();
+                }
             },
         };
     }
@@ -180,6 +248,8 @@ class ZoteroNotesPanel {
         this.disposeObserver?.();
         this.disposeObserver = null;
         this.closeEditor();
+        this.choosingResearchNote = false;
+        this.researchActionPending = false;
         // Drop a list() already in flight. Replacing the bridge with nothing
         // does not start a new refresh, so the generation has to move here.
         this.generation += 1;
@@ -332,11 +402,21 @@ class ZoteroNotesPanel {
             error.code = NOTE_EDITOR_UNAVAILABLE;
             throw error;
         }
+        const handle = this.handle;
+        const token = this.editorToken;
+        this.continuationHintVisible = false;
+        this.renderContinuationHint();
         if (options === undefined) {
-            await this.handle.insertAnnotations(annotations);
-            return;
+            await handle.insertAnnotations(annotations);
         }
-        await this.handle.insertAnnotations(annotations, options);
+        else {
+            await handle.insertAnnotations(annotations, options);
+        }
+        if (!this.destroyed && this.handle === handle && this.editorToken === token
+            && handle.editable && !handle.isGone?.()) {
+            this.continuationHintVisible = true;
+            this.renderContinuationHint();
+        }
     }
 
     back() {
@@ -535,6 +615,8 @@ class ZoteroNotesPanel {
         const handle = this.handle;
         this.handle = null;
         this.mode = 'list';
+        this.continuationHintVisible = false;
+        if (this.elements) this.renderContinuationHint();
         if (handle) {
             try {
                 handle.destroy();
@@ -589,8 +671,14 @@ class ZoteroNotesPanel {
             ? String(scopeNotes.length)
             : `${visibleNotes.length}/${scopeNotes.length}`;
         elements.search.hidden = editing || !listed || !scopeNotes.length;
-        elements.noteScopes.hidden = editing || !listed;
-        elements.newButton.hidden = editing
+        elements.noteScopes.hidden = editing || !listed || this.choosingResearchNote;
+        elements.titleLabel.textContent = this.t(this.choosingResearchNote
+            ? 'notes.chooseResearchNote' : 'viewer.notesTitle');
+        elements.researchPicker.hidden = editing || !this.choosingResearchNote;
+        elements.researchPickerText.textContent = this.t('notes.chooseResearchNoteHint');
+        elements.researchPickerCancel.textContent = this.t('notes.cancelResearchChoice');
+        elements.researchPickerCancel.disabled = this.researchActionPending;
+        elements.newButton.hidden = editing || this.choosingResearchNote
             || !listed
             || (state.status === 'no-parent'
                 && !state.canCreateItemNote
@@ -608,6 +696,7 @@ class ZoteroNotesPanel {
         });
         elements.editorTarget.title = elements.editorTarget.textContent;
         this.renderResearchNote();
+        this.renderContinuationHint();
         this.renderStatus();
         this.renderList();
         this.onStateChange();
@@ -616,15 +705,33 @@ class ZoteroNotesPanel {
     renderResearchNote() {
         const target = this.state.researchNote;
         const { researchStrip, researchTitle, researchLabel, researchContinue,
-            researchClear, researchStatus } = this.elements;
-        researchStrip.hidden = !target || target.status === 'none';
+            researchClear, researchStatus, researchSetup, researchSetupText,
+            researchCreate, researchChoose, researchChange } = this.elements;
+        const listed = ['ready', 'no-parent'].includes(this.state.status);
+        const hasTarget = Boolean(target && target.status !== 'none');
+        const busy = this.openingNote || this.researchActionPending;
+        researchStrip.hidden = !hasTarget || this.choosingResearchNote;
+        researchSetup.hidden = !listed || hasTarget || this.choosingResearchNote
+            || this.mode === 'editor' || !this.adapter?.pinResearchNote;
+        researchSetup.setAttribute('aria-busy', String(this.researchActionPending));
+        researchSetupText.textContent = this.t('notes.researchSetup');
+        researchCreate.textContent = this.t('notes.createResearchNote');
+        researchCreate.disabled = busy || !this.state.canCreateStandaloneNote
+            || !this.adapter?.createResearchNote;
+        researchChoose.textContent = this.t('notes.chooseResearchNote');
+        researchChoose.disabled = busy || !this.state.notes.some(note => (
+            note.kind === 'standalone' && note.editable === true
+        ));
+        researchChange.textContent = this.t('notes.changeResearchNote');
+        researchChange.hidden = !this.adapter?.pinResearchNote || this.choosingResearchNote;
+        researchChange.disabled = busy;
+        researchClear.disabled = busy;
         researchLabel.textContent = this.t('notes.researchNote');
         researchTitle.textContent = target?.note?.title || this.t('notes.untitled');
         setLabel(researchContinue, this.t('notes.continueResearchNote', {
             title: target?.note?.title || this.t('notes.untitled'),
         }));
-        researchContinue.disabled = !['ready', 'readonly'].includes(target?.status)
-            || this.openingNote;
+        researchContinue.disabled = !['ready', 'readonly'].includes(target?.status) || busy;
         setLabel(researchClear, this.t('notes.clearResearchNote'));
         const statusKey = {
             readonly: 'notes.researchReadonly',
@@ -634,6 +741,14 @@ class ZoteroNotesPanel {
         researchStatus.hidden = !statusKey;
         researchStatus.textContent = statusKey ? this.t(statusKey) : '';
         setLabel(this.elements.pinButton, this.t('notes.pinResearchNote'));
+    }
+
+    renderContinuationHint() {
+        const { continuationHint, continuationText, continuationDismiss } = this.elements;
+        continuationHint.hidden = !this.continuationHintVisible || this.mode !== 'editor'
+            || !this.canInsert;
+        continuationText.textContent = this.t('notes.continueAfterExcerpt');
+        setLabel(continuationDismiss, this.t('notes.dismissContinueHint'));
     }
 
     renderStatus() {
@@ -699,8 +814,17 @@ class ZoteroNotesPanel {
             button.appendChild(date);
         }
         button.addEventListener('click', () => {
-            void this.openNote(note.id);
+            if (this.choosingResearchNote) {
+                if (!button.disabled) void this.runAction(() => this.selectResearchNote(note.id));
+            }
+            else {
+                void this.openNote(note.id);
+            }
         });
+        if (this.choosingResearchNote) {
+            button.disabled = this.researchActionPending || note.editable !== true;
+            if (note.editable !== true) button.title = this.t('notes.researchReadonly');
+        }
         button.addEventListener('contextmenu', event => {
             if (this.openNoteMenu(note.id, {
                 screenX: event.screenX,
@@ -712,7 +836,7 @@ class ZoteroNotesPanel {
             }
         });
         item.appendChild(button);
-        if (note.kind === 'standalone' && this.adapter?.pinResearchNote) {
+        if (!this.choosingResearchNote && note.kind === 'standalone' && this.adapter?.pinResearchNote) {
             item.classList.add('mktero-zotero-note-item--pinnable');
             title.id = `mktero-zotero-note-title-${note.id}`;
             const pinned = this.state.researchNote?.note?.id === note.id;
@@ -752,6 +876,23 @@ class ZoteroNotesPanel {
         researchStatus.setAttribute('role', 'status');
         researchRow.append(researchContinue, researchClear);
         researchStrip.append(researchRow, researchStatus);
+        const researchChange = this.element('button', 'mktero-research-note-text-action');
+        researchChange.type = 'button';
+        researchChange.addEventListener('click', () => this.chooseResearchNote());
+        researchStrip.appendChild(researchChange);
+        const researchSetup = this.element('div', 'mktero-research-note-setup');
+        const researchSetupText = this.element('p', 'mktero-research-note-help');
+        const researchActions = this.element('div', 'mktero-research-note-actions');
+        const researchCreate = this.element('button', 'mktero-research-note-create mktero-research-note-action');
+        researchCreate.type = 'button';
+        researchCreate.addEventListener('click', () => {
+            void this.runAction(() => this.createResearchNote());
+        });
+        const researchChoose = this.element('button', 'mktero-research-note-choose mktero-research-note-text-action');
+        researchChoose.type = 'button';
+        researchChoose.addEventListener('click', () => this.chooseResearchNote());
+        researchActions.append(researchCreate, researchChoose);
+        researchSetup.append(researchSetupText, researchActions);
         researchContinue.addEventListener('click', () => {
             void this.runAction(() => this.continueResearchNote());
         });
@@ -808,13 +949,25 @@ class ZoteroNotesPanel {
         search.appendChild(searchInput);
 
         const listView = this.element('div', 'mktero-zotero-notes-list-view');
+        const researchPicker = this.element('div', 'mktero-research-note-picker');
+        const researchPickerText = this.element('p', 'mktero-research-note-help');
+        const researchPickerCancel = this.element('button', 'mktero-research-note-cancel mktero-research-note-text-action');
+        researchPickerCancel.type = 'button';
+        researchPickerCancel.addEventListener('click', () => {
+            if (this.researchActionPending) return;
+            this.choosingResearchNote = false;
+            this.render();
+            if (!researchSetup.hidden) researchChoose.focus();
+            else researchChange.focus();
+        });
+        researchPicker.append(researchPickerText, researchPickerCancel);
         const status = this.element('p', 'mktero-zotero-notes-status');
         status.setAttribute('role', 'status');
         const list = this.element('ul', 'mktero-zotero-notes-list');
         list.setAttribute('id', 'mktero-zotero-notes-list');
         list.setAttribute('role', 'tabpanel');
         list.setAttribute('aria-labelledby', 'mktero-zotero-notes-tab-item');
-        listView.append(header, search, status, list);
+        listView.append(header, researchPicker, search, status, list);
 
         const editorView = this.element('div', 'mktero-zotero-notes-editor-view');
         const editorBar = this.element('div', 'mktero-zotero-notes-editor-bar');
@@ -834,10 +987,22 @@ class ZoteroNotesPanel {
         editorBar.append(backButton, editorTarget, pinButton, windowButton);
         const slot = this.element('slot', 'mktero-zotero-note-slot');
         slot.setAttribute('name', NOTE_EDITOR_SLOT);
-        editorView.append(editorBar, slot);
+        const continuationHint = this.element('div', 'mktero-note-continuation-hint');
+        const continuationText = this.element('span', 'mktero-note-continuation-text');
+        continuationText.setAttribute('role', 'status');
+        continuationText.setAttribute('aria-live', 'polite');
+        const continuationDismiss = this.iconButton('mktero-note-continuation-dismiss',
+            LUCIDE_ICONS.x, 'notes.dismissContinueHint');
+        continuationDismiss.addEventListener('click', () => {
+            this.continuationHintVisible = false;
+            this.renderContinuationHint();
+            this.handle?.focus?.();
+        });
+        continuationHint.append(continuationText, continuationDismiss);
+        editorView.append(editorBar, continuationHint, slot);
         editorView.hidden = true;
 
-        this.aside.replaceChildren(researchStrip, listView, editorView);
+        this.aside.replaceChildren(researchStrip, researchSetup, listView, editorView);
         newButton.addEventListener('click', () => {
             if (this.openCreateMenu({ anchor: newButton })) return;
             void this.createNote('item');
@@ -851,7 +1016,10 @@ class ZoteroNotesPanel {
         });
         const elements = {
             researchStrip, researchLabel, researchTitle, researchContinue,
-            researchClear, researchStatus, pinButton, editorTarget,
+            researchClear, researchStatus, researchSetup, researchSetupText,
+            researchCreate, researchChoose, researchChange,
+            researchPicker, researchPickerText, researchPickerCancel,
+            continuationHint, continuationText, continuationDismiss, pinButton, editorTarget,
             listView,
             editorView,
             titleLabel,

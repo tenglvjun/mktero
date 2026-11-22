@@ -14,6 +14,8 @@ function createFakeZotero(items = []) {
     const byID = new Map(items.map(item => [item.id, item]));
     const libraries = new Map();
     const constructed = [];
+    const createdItems = [];
+    let nextItemID = 500;
     const preferenceValues = new Map();
     const preferenceObservers = new Map();
     let nextPreferenceObserver = 1;
@@ -31,19 +33,27 @@ function createFakeZotero(items = []) {
     };
     function Item(type) {
         constructed.push(type);
+        createdItems.push(this);
         this.itemType = type;
         this.isNote = () => type === 'note';
         this.libraryID = null;
         this.parentID = null;
         this.id = 0;
+        let noteHTML = '';
+        this.setNote = html => { noteHTML = html; };
+        this.getNote = () => noteHTML;
         this.saveTx = async () => {
-            this.id = 500;
+            this.id = nextItemID++;
+            this.key = `NOTE${String(this.id).padStart(4, '0')}`;
+            byID.set(this.id, this);
+            items.push(this);
         };
     }
     const zotero = {
         byID,
         libraries,
         constructed,
+        createdItems,
         notifier,
         preferenceValues,
         preferenceObservers,
@@ -118,6 +128,20 @@ function createFakeZotero(items = []) {
         },
     };
     return zotero;
+}
+
+function pauseNoteSave(zotero) {
+    const gate = Promise.withResolvers();
+    const Item = zotero.Item;
+    zotero.Item = function PausedItem(type) {
+        Item.call(this, type);
+        const saveTx = this.saveTx;
+        this.saveTx = async () => {
+            await gate.promise;
+            return saveTx.call(this);
+        };
+    };
+    return gate;
 }
 
 function pdfAttachment(overrides = {}) {
@@ -1241,6 +1265,231 @@ test('dispose unregisters the item observer and drops a pending notification', (
 });
 
 const RESEARCH_TARGETS_PREF = 'extensions.mktero.researchNoteTargets';
+
+test('creates and pins an ordinary standalone research note only after saving its literal title', async () => {
+    const old = standaloneNoteItem({ key: 'RESEARCH' });
+    const zotero = createFakeZotero([pdfAttachment(), parentItem(), old]);
+    const timers = createTimers();
+    const options = { setTimeout: timers.setTimeout, clearTimeout: timers.clearTimeout };
+    const notes = createZoteroNotes(zotero, options);
+    const otherTab = createZoteroNotes(zotero, options);
+    await notes.pinResearchNote(42, old.id);
+    const notifications = [];
+    notes.observe(() => notifications.push('creator'));
+    otherTab.observe(() => notifications.push('other-tab'));
+    const gate = pauseNoteSave(zotero);
+    const title = '研究笔记 <img src=x onerror="alert(1)"> & \'ideas\' &lt;';
+    const pending = notes.createResearchNote(42, { title });
+    const created = zotero.createdItems[0];
+
+    assert.equal(created.itemType, 'note');
+    assert.equal(created.libraryID, 7);
+    assert.equal(created.parentID, null);
+    assert.equal(created.id, 0);
+    assert.equal(created.key, undefined);
+    assert.equal(created.getNote(), '<p>研究笔记 &lt;img src=x onerror=&quot;alert(1)&quot;&gt; &amp; &#39;ideas&#39; &amp;lt;</p>');
+    assert.equal(zotero.preferenceValues.get(RESEARCH_TARGETS_PREF), '{"7":"RESEARCH"}');
+    timers.flush();
+    assert.deepEqual(notifications, []);
+
+    gate.resolve();
+    assert.deepEqual(await pending, { noteID: created.id });
+    assert.equal(zotero.byID.get(created.id), created);
+    assert.equal(zotero.preferenceValues.get(RESEARCH_TARGETS_PREF), `{"7":"${created.key}"}`);
+    timers.flush();
+    assert.deepEqual(notifications, ['creator', 'other-tab']);
+    const research = await otherTab.getResearchNote(42);
+    assert.equal(research.status, 'ready');
+    assert.equal(research.note.id, created.id);
+    assert.equal(research.note.title, title);
+    assert.equal(zotero.preferenceObservers.size, 2);
+    notes.dispose();
+    otherTab.dispose();
+    assert.equal(zotero.preferenceObservers.size, 0);
+});
+
+test('creates a research note for a PDF without a parent and leaves its title editable', async () => {
+    const zotero = createFakeZotero([pdfAttachment({ parentID: null })]);
+    const notes = createZoteroNotes(zotero);
+    const result = await notes.createResearchNote(42, { title: 'Research note' });
+    const created = zotero.byID.get(result.noteID);
+
+    assert.equal(created.libraryID, 7);
+    assert.equal(created.parentID, null);
+    assert.equal(created.getNote(), '<p>Research note</p>');
+    created.setNote('<p>My revised question</p>');
+    assert.equal((await notes.getResearchNote(42)).note.title, 'My revised question');
+    assert.equal(zotero.preferenceObservers.size, 0);
+});
+
+test('refuses unavailable sources and read-only libraries without replacing the research target', async t => {
+    const cases = [
+        ['missing PDF', (zotero, source) => zotero.byID.delete(source.id)],
+        ['deleted PDF', (_zotero, source) => { source.deleted = true; }],
+        ['invalid library', (_zotero, source) => { source.libraryID = 0; }],
+        ['missing library', zotero => { zotero.Libraries.get = () => null; }],
+        ['read-only library', zotero => { zotero.libraries.set(7, { editable: false }); }],
+    ];
+    for (const [name, mutate] of cases) {
+        await t.test(name, async () => {
+            const source = pdfAttachment();
+            const old = standaloneNoteItem({ key: 'RESEARCH' });
+            const zotero = createFakeZotero([source, old]);
+            const notes = createZoteroNotes(zotero);
+            await notes.pinResearchNote(42, old.id);
+            mutate(zotero, source);
+
+            await assert.rejects(notes.createResearchNote(42, { title: 'Research note' }),
+                codeError('MKTERO_NOTE_EDITOR_UNAVAILABLE'));
+            assert.deepEqual(zotero.constructed, []);
+            assert.equal(zotero.preferenceValues.get(RESEARCH_TARGETS_PREF), '{"7":"RESEARCH"}');
+            assert.equal(zotero.preferenceObservers.size, 0);
+        });
+    }
+});
+
+test('a failed research note save preserves the target and releases the creation guard', async () => {
+    const old = standaloneNoteItem({ key: 'RESEARCH' });
+    const zotero = createFakeZotero([pdfAttachment(), old]);
+    const notes = createZoteroNotes(zotero);
+    await notes.pinResearchNote(42, old.id);
+    const saveFailure = new Error('save failed');
+    const Item = zotero.Item;
+    zotero.Item = function FailingItem(type) {
+        Item.call(this, type);
+        this.saveTx = async () => { throw saveFailure; };
+    };
+
+    await assert.rejects(notes.createResearchNote(42, { title: 'Research note' }),
+        error => error === saveFailure);
+    assert.equal(zotero.preferenceValues.get(RESEARCH_TARGETS_PREF), '{"7":"RESEARCH"}');
+    assert.equal(zotero.preferenceObservers.size, 0);
+    assert.equal(zotero.createdItems[0].id, 0);
+
+    zotero.Item = Item;
+    const result = await notes.createResearchNote(42, { title: 'Try again' });
+    assert.equal(result.noteID, zotero.createdItems[1].id);
+    assert.equal((await notes.getResearchNote(42)).note.id, result.noteID);
+});
+
+test('source, permission and saved-note changes during creation cannot replace the target', async t => {
+    const cases = [
+        ['source moved', (_zotero, source) => { source.libraryID = 8; }],
+        ['source deleted', (_zotero, source) => { source.deleted = true; }],
+        ['source removed', (zotero, source) => zotero.byID.delete(source.id)],
+        ['library removed', zotero => { zotero.Libraries.get = () => null; }],
+        ['permission revoked', zotero => { zotero.libraries.set(7, { editable: false }); }],
+        ['note read-only', (_zotero, _source, note) => { note.isEditable = () => false; }],
+        ['note moved', (_zotero, _source, note) => { note.libraryID = 8; }],
+        ['note attached to item', (_zotero, _source, note) => { note.parentID = 9; }],
+        ['note deleted', (_zotero, _source, note) => { note.deleted = true; }],
+    ];
+    for (const [name, mutate] of cases) {
+        await t.test(name, async () => {
+            const source = pdfAttachment();
+            const old = standaloneNoteItem({ key: 'RESEARCH' });
+            const zotero = createFakeZotero([source, parentItem(), old]);
+            const notes = createZoteroNotes(zotero);
+            await notes.pinResearchNote(42, old.id);
+            const gate = pauseNoteSave(zotero);
+            const pending = notes.createResearchNote(42, { title: 'Research note' });
+            const created = zotero.createdItems[0];
+            mutate(zotero, source, created);
+            gate.resolve();
+
+            await assert.rejects(pending, codeError('MKTERO_NOTE_EDITOR_UNAVAILABLE'));
+            assert.equal(zotero.preferenceValues.get(RESEARCH_TARGETS_PREF), '{"7":"RESEARCH"}');
+            assert.equal(zotero.byID.get(created.id), created);
+            assert.equal(zotero.preferenceObservers.size, 0);
+        });
+    }
+});
+
+test('another tab changing or clearing the target during save prevents automatic pinning', async t => {
+    for (const change of ['pin', 'clear', 'change-and-restore']) {
+        await t.test(change, async () => {
+            const old = standaloneNoteItem({ key: 'RESEARCH' });
+            const other = standaloneNoteItem({ id: 2, key: 'OTHER001' });
+            const zotero = createFakeZotero([pdfAttachment(), pdfAttachment({ id: 43 }), old, other]);
+            const notes = createZoteroNotes(zotero);
+            const otherTab = createZoteroNotes(zotero);
+            await notes.pinResearchNote(42, old.id);
+            const gate = pauseNoteSave(zotero);
+            const pending = notes.createResearchNote(42, { title: 'Research note' });
+            if (change === 'clear') otherTab.clearResearchNote(43);
+            else await otherTab.pinResearchNote(43, other.id);
+            if (change === 'change-and-restore') await otherTab.pinResearchNote(43, old.id);
+            const expectedTarget = zotero.preferenceValues.get(RESEARCH_TARGETS_PREF);
+            gate.resolve();
+
+            await assert.rejects(pending, codeError('MKTERO_NOTE_TARGET_CHANGED'));
+            assert.equal(zotero.preferenceValues.get(RESEARCH_TARGETS_PREF), expectedTarget);
+            const created = zotero.createdItems[0];
+            assert.equal(zotero.byID.get(created.id), created);
+            assert.equal(created.deleted, undefined);
+            assert.equal(created.parentID, null);
+            assert.equal(zotero.preferenceObservers.size, 0);
+        });
+    }
+});
+
+test('creation rechecks source, target and permission after the persisted note loads', async t => {
+    const cases = [
+        ['source moved', (zotero, source) => { source.libraryID = 8; }, 'MKTERO_NOTE_EDITOR_UNAVAILABLE'],
+        ['permission revoked', zotero => { zotero.libraries.set(7, { editable: false }); }, 'MKTERO_NOTE_EDITOR_UNAVAILABLE'],
+        ['target changed', zotero => { zotero.Prefs.set(RESEARCH_TARGETS_PREF, '{"7":"OTHER001"}'); }, 'MKTERO_NOTE_TARGET_CHANGED'],
+    ];
+    for (const [name, mutate, code] of cases) {
+        await t.test(name, async () => {
+            const source = pdfAttachment();
+            const old = standaloneNoteItem({ key: 'RESEARCH' });
+            const zotero = createFakeZotero([source, old]);
+            const notes = createZoteroNotes(zotero);
+            await notes.pinResearchNote(42, old.id);
+            const loading = Promise.withResolvers();
+            const gate = Promise.withResolvers();
+            zotero.Items.loadDataTypes = async () => {
+                loading.resolve();
+                await gate.promise;
+            };
+            const pending = notes.createResearchNote(42, { title: 'Research note' });
+            await loading.promise;
+            mutate(zotero, source);
+            const expectedTarget = zotero.preferenceValues.get(RESEARCH_TARGETS_PREF);
+            gate.resolve();
+
+            await assert.rejects(pending, codeError(code));
+            assert.equal(zotero.preferenceValues.get(RESEARCH_TARGETS_PREF), expectedTarget);
+            assert.equal(zotero.byID.get(zotero.createdItems[0].id), zotero.createdItems[0]);
+            assert.equal(zotero.preferenceObservers.size, 0);
+        });
+    }
+});
+
+test('guards concurrent research note creation across services per library', async () => {
+    const zotero = createFakeZotero([
+        pdfAttachment(), pdfAttachment({ id: 43 }),
+        pdfAttachment({ id: 44, libraryID: 8, parentID: null }),
+    ]);
+    const firstTab = createZoteroNotes(zotero);
+    const secondTab = createZoteroNotes(zotero);
+    const gate = pauseNoteSave(zotero);
+    const first = firstTab.createResearchNote(42, { title: 'First library' });
+    await assert.rejects(secondTab.createResearchNote(43, { title: 'Duplicate' }),
+        /already being created/);
+    assert.equal(zotero.constructed.length, 1);
+    const otherLibrary = secondTab.createResearchNote(44, { title: 'Other library' });
+    assert.equal(zotero.constructed.length, 2);
+    gate.resolve();
+
+    const [firstResult, otherResult] = await Promise.all([first, otherLibrary]);
+    assert.equal((await firstTab.getResearchNote(42)).note.id, firstResult.noteID);
+    assert.equal((await secondTab.getResearchNote(44)).note.id, otherResult.noteID);
+    assert.equal(zotero.preferenceObservers.size, 0);
+    const next = await secondTab.createResearchNote(43);
+    assert.notEqual(next.noteID, firstResult.noteID);
+    assert.equal(zotero.byID.get(next.noteID).getNote(), '<p></p>');
+});
 
 test('pins a standalone research note and restores its key through another service and PDF', async () => {
     const firstPDF = pdfAttachment();
