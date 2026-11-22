@@ -1,6 +1,6 @@
 {
   "name": "mktero",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "description": "Display opened Zotero PDFs as Markdown",
   "private": true,
   "type": "module",
