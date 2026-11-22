@@ -342,6 +342,7 @@ export function createMarkdownTabView({
     // change the reader makes. Responsive collapsing is not reported.
     panelLayout = null,
     onPanelLayoutChange = null,
+    onNativeSidebarChange = null,
 }) {
     return new MarkdownTabView({
         document,
@@ -367,6 +368,7 @@ export function createMarkdownTabView({
         readingPositionDelay,
         panelLayout,
         onPanelLayoutChange,
+        onNativeSidebarChange,
     });
 }
 
@@ -395,6 +397,7 @@ class MarkdownTabView {
         readingPositionDelay,
         panelLayout,
         onPanelLayoutChange,
+        onNativeSidebarChange,
     }) {
         this.localization = localization;
         this.t = localization.t.bind(localization);
@@ -529,6 +532,14 @@ class MarkdownTabView {
         this.onPanelLayoutChange = typeof onPanelLayoutChange === 'function'
             ? onPanelLayoutChange
             : null;
+        this.onNativeSidebarChange = typeof onNativeSidebarChange === 'function'
+            ? onNativeSidebarChange
+            : null;
+        this.nativeSidebarOpen = false;
+        // Visibility can yield to the native pane, focus mode or window width.
+        // Keep the user's intent so these temporary changes never become a
+        // closed-note preference or replace the hosted editor.
+        this.notesSidebarWanted = initialPanelLayout.notes.visible;
         this.outlineSegment = initialPanelLayout.outlineSegment;
         this.notesColumnAvailable = false;
         this.zoteroNotesAdapter = null;
@@ -1139,6 +1150,7 @@ class MarkdownTabView {
             this.zotero?.logError?.(error);
         }
         this.destroyed = true;
+        this.onNativeSidebarChange = null;
         this.cancelReadingSurfaceFocus();
         this.landmarkItems = null;
         this.shortcutsPanelOpen = false;
@@ -1672,8 +1684,9 @@ class MarkdownTabView {
         if (!panel.canPrepareInsert) {
             throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'No note destination is available');
         }
-        if (!this.sidePanels.notes.visible) {
-            this.setSidePanelVisibility('notes', true, { source: 'user' });
+        if (!this.sidePanels.notes.visible
+            && !this.setSidePanelVisibility('notes', true, { source: 'user' })) {
+            throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The note editor cannot be shown');
         }
         return panel.prepareInsert();
     }
@@ -1681,8 +1694,9 @@ class MarkdownTabView {
     async createNoteFromAnnotations() {
         const panel = this.zoteroNotesPanel;
         if (!panel?.canCreateFromAnnotations) return;
-        if (!this.sidePanels.notes.visible) {
-            this.setSidePanelVisibility('notes', true, { source: 'user' });
+        if (!this.sidePanels.notes.visible
+            && !this.setSidePanelVisibility('notes', true, { source: 'user' })) {
+            throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The note editor cannot be shown');
         }
         await panel.createFromAnnotations({
             segmentsFor: key => this.noteSegmentsForAnnotationKey(key),
@@ -5134,10 +5148,42 @@ class MarkdownTabView {
         }
     }
 
+    setNativeSidebarOpen(open) {
+        if (this.destroyed) return;
+        const next = Boolean(open);
+        if (next === this.nativeSidebarOpen && !(next && this.focusMode)) return;
+        this.nativeSidebarOpen = next;
+        if (next) {
+            this.cancelReadingSurfaceFocus();
+            // This is an explicit native expansion. Merely suspending the
+            // pane for focus mode is filtered by the window's native bridge.
+            if (this.focusMode) this.setFocusMode(false);
+        }
+        this.setSidePanelVisibility('notes', this.notesSidebarWanted, {
+            source: 'native',
+        });
+        this.syncResponsiveSidePanels();
+    }
+
+    requestNativeSidebarChange(change) {
+        try {
+            return this.onNativeSidebarChange?.(change) !== false;
+        }
+        catch (error) {
+            this.zotero?.logError?.(error);
+            return false;
+        }
+    }
+
     setFocusMode(enabled) {
+        if (this.destroyed) return false;
         const next = Boolean(enabled);
-        if (next === this.focusMode) return;
+        if (next === this.focusMode) return true;
         this.focusMode = next;
+        if (!this.requestNativeSidebarChange({ focusMode: next }) && next) {
+            this.focusMode = false;
+            return false;
+        }
         this.elements.view.classList.toggle('is-focus-mode', next);
         if (next) {
             this.setDocumentActionsOpen(false);
@@ -5147,7 +5193,6 @@ class MarkdownTabView {
             this.setTypographyOpen(false);
             this.focusModeRestore = {
                 outline: this.sidePanels.outline.visible,
-                notes: this.sidePanels.notes.visible,
             };
             this.setSidePanelVisibility('outline', false, { source: 'focus' });
             this.setSidePanelVisibility('notes', false, { source: 'focus' });
@@ -5159,13 +5204,14 @@ class MarkdownTabView {
             this.setSidePanelVisibility('outline', restore.outline !== false, {
                 source: 'focus',
             });
-            this.setSidePanelVisibility('notes', restore.notes !== false, {
+            this.setSidePanelVisibility('notes', this.notesSidebarWanted, {
                 source: 'focus',
             });
             this.syncResponsiveSidePanels();
             this.scheduleSourcePeek();
         }
         this.syncFocusModeControls();
+        return true;
     }
 
     syncFocusModeControls() {
@@ -5335,22 +5381,22 @@ class MarkdownTabView {
         this.editor?.focus?.();
     }
 
-    // Yield the keyboard only to a caret the reader can see: a field inside
-    // this view, or the note editor hosted in this tab. The Zotero context
-    // pane is hidden while this tab is selected, and another tab's frame is
-    // off screen; leaving the keyboard in either one is why n, p and "?"
-    // stopped reaching the reader.
+    // Visible note and native-pane controls keep their keyboard focus. A
+    // suspended or collapsed frame must release it back to the reader.
     shouldLeaveFocusAlone() {
         const inner = this.mount?.activeElement || null;
-        if (inner) return true;
+        if (inner && !(this.elements.notes.hidden && this.elements.notes.contains(inner))) {
+            return true;
+        }
         const active = this.document.activeElement;
         if (!active || active === this.host || active.isConnected === false) {
             return false;
         }
+        if (this.nativeSidebarContains(active)) return true;
         const container = this.zoteroNotesPanel?.editorContainer;
         if (container?.isConnected
             && (active === container || container.contains(active))) {
-            return true;
+            return !this.elements.notes.hidden;
         }
         const tab = this.host.parentElement;
         if (tab && typeof tab.contains === 'function' && !tab.contains(active)) {
@@ -5363,11 +5409,62 @@ class MarkdownTabView {
         return isExternalTextFocus(active);
     }
 
+    nativeSidebarContains(node) {
+        if (!node || !this.nativeSidebarOpen || this.focusMode) return false;
+        const pane = this.document.getElementById?.('zotero-context-pane');
+        if (!isVisibleChromeElement(pane)) return false;
+        if (node === pane || (node.nodeType && pane.contains(node))) {
+            return isVisibleChromeElement(node);
+        }
+        try {
+            let owner = node.nodeType === 9 ? node : node.ownerDocument || node.document;
+            // A plugin may put its editor in a nested frame. Follow chrome's
+            // frame owners before falling back to XUL browser documents.
+            for (let depth = 0; owner && owner !== this.document && depth < 16; depth += 1) {
+                const frame = owner.defaultView?.frameElement;
+                if (!frame) break;
+                if (pane.contains(frame)) return isVisibleChromeElement(frame);
+                owner = frame.ownerDocument;
+            }
+            const document = node.nodeType === 9 ? node : node.ownerDocument || node.document;
+            return [...pane.querySelectorAll('iframe, browser, frame')].some(frame => {
+                if (!isVisibleChromeElement(frame)) return false;
+                try {
+                    return frame.contentDocument === document
+                        || frame.contentWindow === node;
+                }
+                catch {
+                    return false;
+                }
+            });
+        }
+        catch {
+            // A closing or cross-origin plugin frame can deny access.
+            return false;
+        }
+    }
+
+    isNativeSidebarEvent(event) {
+        const candidates = [
+            event.originalTarget,
+            event.explicitOriginalTarget,
+            event.target,
+            this.document.activeElement,
+        ];
+        try {
+            candidates.push(...(event.composedPath?.() || []));
+        }
+        catch {
+            // A plugin can expose a target without exposing its event path.
+        }
+        return candidates.some(node => this.nativeSidebarContains(node));
+    }
+
     // Zotero's note editor sits in the host's light DOM, slotted into the
-    // notes column, so a key pressed in it can reach the host and the shadow
-    // root. Only that editor counts: a key whose path names some other frame
-    // (the PDF reader, the hidden context pane) still belongs to the reader.
+    // notes column. Only its visible editor owns a key retargeted here;
+    // hidden frames still release the keyboard to the reading surface.
     isHostedNoteEvent(event) {
+        if (this.elements.notes.hidden) return false;
         const container = this.zoteroNotesPanel?.editorContainer;
         if (!container?.isConnected) return false;
         const frame = container.querySelector?.('iframe, browser, frame');
@@ -5399,6 +5496,7 @@ class MarkdownTabView {
     // history chord are delivered here with the frame, or with the caret's
     // own document, as the target. Either one belongs to the note.
     shortcutBlockedByForeignFocus(event) {
+        if (this.isNativeSidebarEvent(event)) return true;
         const seen = new Set();
         const candidates = [
             event.originalTarget,
@@ -5637,7 +5735,7 @@ class MarkdownTabView {
     // focus. Text fields inside the view (find, note search, a comment)
     // still keep the key.
     handleReaderJumpShortcut(event) {
-        if (this.destroyed || event.isComposing) return;
+        if (this.destroyed || event.isComposing || this.isNativeSidebarEvent(event)) return;
         if (isShortcutsPanelShortcut(event)) {
             if (this.shortcutsPanelOpen) return;
             const origin = event.composedPath?.()[0] || event.target;
@@ -7269,11 +7367,16 @@ class MarkdownTabView {
         resizer.setAttribute('aria-valuenow', String(nextWidth));
     }
 
-    // `source` is 'user' for a reader action, 'responsive' for a collapse the
-    // window width caused, and 'restore' for the saved layout a tab opens
-    // with. Only a reader action is remembered for the next tab.
+    // `source` distinguishes explicit choices from temporary layout changes.
+    // Only a reader action is remembered for the next tab.
     setSidePanelVisibility(name, visible, { source = 'user' } = {}) {
+        if (this.destroyed) return false;
         const panel = this.sidePanels[name];
+        const next = Boolean(visible);
+        if (name === 'notes' && source === 'user' && next && this.nativeSidebarOpen) {
+            if (!this.requestNativeSidebarChange({ open: false })) return false;
+            this.nativeSidebarOpen = false;
+        }
         this.finishSidePanelResize(name);
         if (source === 'user') {
             const responsive = this.responsivePanels[name];
@@ -7283,11 +7386,21 @@ class MarkdownTabView {
             responsive.userOverride = Number.isFinite(breakpoint)
                 && containerWidth <= breakpoint;
         }
-        panel.visible = visible;
+        if (name === 'notes' && ['user', 'restore'].includes(source)) {
+            this.notesSidebarWanted = next;
+        }
+        if (source === 'user' && next && this.focusMode) {
+            this.setFocusMode(false);
+        }
+        panel.visible = name === 'notes'
+            ? this.notesSidebarWanted && !this.nativeSidebarOpen && !this.focusMode
+                && !this.responsivePanels.notes.autoCollapsed
+            : next;
         this.renderSidePanelVisibility(name);
         if (source === 'user') {
-            this.reportPanelLayout({ [name]: { visible: Boolean(visible) } });
+            this.reportPanelLayout({ [name]: { visible: next } });
         }
+        return true;
     }
 
     renderSidePanelVisibility(name) {
@@ -7320,6 +7433,7 @@ class MarkdownTabView {
     }
 
     syncResponsiveSidePanels(measuredWidth = null) {
+        if (this.destroyed || this.focusMode) return;
         const containerWidth = this.responsiveSidePanelWidth(measuredWidth);
         if (!Number.isFinite(containerWidth)) return;
 
@@ -7341,7 +7455,8 @@ class MarkdownTabView {
                 continue;
             }
             if (responsive.userOverride || responsive.autoCollapsed) continue;
-            if (!panel.visible) continue;
+            const wanted = name === 'notes' ? this.notesSidebarWanted : panel.visible;
+            if (!wanted) continue;
             responsive.autoCollapsed = true;
             this.setSidePanelVisibility(name, false, {
                 source: 'responsive',
@@ -9279,6 +9394,33 @@ const TEXT_INPUT_TYPES = new Set([
     'time',
     'week',
 ]);
+
+function isVisibleChromeElement(element) {
+    if (!element || element.isConnected === false) return false;
+    const origin = element.nodeType === 1 ? element : element.parentElement;
+    if (!origin) return false;
+    for (let current = origin; current?.nodeType === 1; current = current.parentElement) {
+        const hidden = current.getAttribute?.('hidden');
+        if (current.hidden === true || hidden === '' || hidden === 'true'
+            || current.getAttribute?.('collapsed') === 'true'
+            || current.getAttribute?.('aria-hidden') === 'true') {
+            return false;
+        }
+        try {
+            const style = current.ownerDocument?.defaultView?.getComputedStyle?.(current)
+                || current.style;
+            if (style?.display === 'none'
+                || style?.visibility === 'hidden'
+                || style?.visibility === 'collapse') {
+                return false;
+            }
+        }
+        catch {
+            return false;
+        }
+    }
+    return true;
+}
 
 function isTextEditingOrigin(element) {
     if (!element) return false;

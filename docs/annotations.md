@@ -135,9 +135,19 @@ If Zotero's note editor changes in an unrecognized way, insertion falls back to 
 
 #### Side panels and saved layout
 
-While a Mktero tab is selected, Mktero hides Zotero's right-hand item pane, the context pane. It returns when another tab is selected. Zotero does not update it for Mktero tabs, so it would otherwise show the previous tab's paper.
+Zotero's native sidebar shows the current paper's context in a Mktero tab. The native sidebar and Mktero's `Notes` column share the right side; their content is mutually exclusive:
 
-Zotero preferences save which columns are open, their widths, and the selected left segment: `extensions.mktero.readerOutlineVisible`, `readerOutlineWidth`, `readerOutlineSegment`, `readerNotesVisible`, and `readerNotesWidth`. The next Mktero tab uses them. Automatic collapsing in a narrow window is not saved.
+- Opening the native sidebar temporarily hides Mktero's Notes while keeping its editor open.
+- Closing the native sidebar restores your previous Notes choice. If Notes was closed, it stays closed; both panels can remain closed.
+- Explicitly opening Mktero's Notes closes the native sidebar first.
+
+Focus mode and tab switching suspend panel display independently of these choices. Temporary hiding for the native sidebar, focus mode, tab switching, or a narrow window does not change the saved Notes preference.
+
+The native notes panel currently browses notes at library level in Mktero. Use Mktero's `Notes` for the current paper's note interactions, because Zotero's corresponding native actions depend on its PDF Reader. These remain ordinary Zotero notes edited with Zotero's native editor.
+
+Third-party plugin features that depend on a real Zotero Reader or a PDF selection do not automatically work in Mktero. Having the native sidebar available does not guarantee compatibility with every plugin.
+
+Zotero preferences save your chosen Mktero column visibility, widths, and selected left segment: `extensions.mktero.readerOutlineVisible`, `readerOutlineWidth`, `readerOutlineSegment`, `readerNotesVisible`, and `readerNotesWidth`. The next Mktero tab uses them; temporary automatic layout changes are not saved.
 
 The separate `extensions.mktero.researchNoteTargets` preference stores a note key for each library ID. It keeps no note title or content, is unencrypted in the local profile, and is neither sent nor synced by Mktero. Research-note contents remain in Zotero note items and sync according to Zotero settings. Clearing the research-note choice removes that library's reference without deleting the note.
 

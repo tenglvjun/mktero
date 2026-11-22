@@ -1364,7 +1364,7 @@ test('fills in a notes bridge when the open tab does not have one yet', () => {
     presenter.dispose();
 });
 
-test('hides the context pane while a Mktero tab is selected and clears it on dispose', () => {
+test('shows the context pane only after a Mktero source has been bound and clears it on dispose', () => {
     assert.equal(MKTERO_TAB_SELECTED_ATTRIBUTE, 'mktero-tab-selected');
     const { document } = parseHTML('<html><body></body></html>');
     const mainWindow = createMainWindow(document);
@@ -1403,6 +1403,7 @@ test('hides the context pane while a Mktero tab is selected and clears it on dis
     assert.equal(registrations[0].id, 'mktero-context-pane');
 
     mainWindow.Zotero_Tabs.selectedType = 'mktero';
+    mainWindow.Zotero_Tabs.selectedID = 'tab-1';
     registrations[0].observer.notify('modify', 'tab');
     assert.equal(
         document.documentElement.hasAttribute('mktero-tab-selected'),
