@@ -135,9 +135,19 @@ Mktero 在 Zotero 配置目录的 `mktero-annotations/groups-v1` 中保存分组
 
 #### 侧栏与布局保存
 
-选中 Mktero 标签页时，会隐藏 Zotero 右侧条目面板（上下文面板）；切换到其他标签页后恢复。Zotero 不会为 Mktero 标签页更新该面板，否则它仍会显示前一个标签页的论文。
+Zotero 原生侧栏可在 Mktero 标签页中显示当前文献的上下文。它与 Mktero 的`笔记`栏共用右侧空间，两者的内容互斥显示：
 
-哪些栏打开、栏宽和左栏选中的分段保存在 Zotero 首选项中：`extensions.mktero.readerOutlineVisible`、`readerOutlineWidth`、`readerOutlineSegment`、`readerNotesVisible` 和 `readerNotesWidth`。下一个 Mktero 标签页会沿用这些设置；窄窗口触发的自动收起不会保存。
+- 展开原生侧栏时，临时隐藏 Mktero 笔记，保留已打开的编辑器。
+- 关闭原生侧栏后，按之前的笔记展开意图恢复。原先笔记关闭就继续关闭，两栏可以同时保持关闭。
+- 主动展开 Mktero 笔记时，会先关闭原生侧栏。
+
+专注模式与标签页切换独立于这些开关，只临时隐藏相应面板。原生侧栏、专注模式、标签页切换或窄窗口造成的临时隐藏，都不会改写笔记的展开偏好。
+
+原生笔记面板在 Mktero 下目前按文库浏览。当前论文的笔记交互请继续使用 Mktero 的`笔记`，因为 Zotero 对应的原生操作依赖其 PDF Reader。笔记仍是普通 Zotero 笔记，使用 Zotero 原生编辑器编辑。
+
+第三方插件中依赖真实 Zotero Reader 或 PDF 选区的功能，不会自动兼容 Mktero。原生侧栏可用不代表所有插件都受支持。
+
+Mktero 各栏的主动开关选择、栏宽和左栏选中的分段保存在 Zotero 首选项中：`extensions.mktero.readerOutlineVisible`、`readerOutlineWidth`、`readerOutlineSegment`、`readerNotesVisible` 和 `readerNotesWidth`。下一个 Mktero 标签页会沿用这些设置；临时自动布局变化不会保存。
 
 另有 `extensions.mktero.researchNoteTargets` 偏好按文库 ID 保存笔记 key，不保存笔记标题或正文，未加密地留在本地配置文件中，Mktero 不发送或同步它。研究笔记内容仍保存在 Zotero 笔记条目中，并按 Zotero 设置同步。取消固定只移除该文库的引用，不删除笔记。
 

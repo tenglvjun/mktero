@@ -108,6 +108,7 @@ function createView(model = createModel(), zotero = {}, options = {}) {
         readingPositionDelay: options.readingPositionDelay,
         panelLayout: options.panelLayout,
         onPanelLayoutChange: options.onPanelLayoutChange,
+        onNativeSidebarChange: options.onNativeSidebarChange,
     });
     view.render(model);
     return { document, view, shadow: view.host.shadowRoot };
@@ -10828,6 +10829,478 @@ test('does not report a responsive side-panel collapse', () => {
 
         shadow.querySelector('#mktero-outline-toggle').click();
         assert.deepEqual(changes, [{ outline: { visible: true } }]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('temporarily yields notes to the native sidebar and restores only the previous intent', () => {
+    for (const initiallyVisible of [true, false]) {
+        const changes = [];
+        const nativeChanges = [];
+        const { view, shadow } = createView(createModel(), {}, {
+            configureWindow: wideReaderWindow,
+            panelLayout: { notes: { visible: initiallyVisible } },
+            onPanelLayoutChange: change => changes.push(change),
+            onNativeSidebarChange: change => nativeChanges.push(change),
+        });
+        const notes = shadow.querySelector('#mktero-notes');
+        const toggle = shadow.querySelector('#mktero-notes-toggle');
+        try {
+            assert.equal(view.nativeSidebarOpen, false);
+            assert.deepEqual(nativeChanges, []);
+            view.setNativeSidebarOpen(true);
+            view.setNativeSidebarOpen(true);
+            assert.equal(notes.hidden, true);
+            assert.equal(toggle.getAttribute('aria-expanded'), 'false');
+            view.setNativeSidebarOpen(false);
+            view.setNativeSidebarOpen(false);
+            assert.equal(notes.hidden, !initiallyVisible);
+            assert.equal(toggle.getAttribute('aria-expanded'), String(initiallyVisible));
+            assert.deepEqual(changes, []);
+            assert.deepEqual(nativeChanges, []);
+        }
+        finally {
+            view.destroy();
+        }
+    }
+});
+
+test('an explicit notes toggle replaces the native sidebar without a return history', () => {
+    const changes = [];
+    const nativeChanges = [];
+    const { view, shadow } = createView(createModel(), {}, {
+        configureWindow: wideReaderWindow,
+        onPanelLayoutChange: change => changes.push(change),
+        onNativeSidebarChange(change) {
+            nativeChanges.push(change);
+            // Native observers may report the close synchronously.
+            if (change.open === false) view.setNativeSidebarOpen(false);
+        },
+    });
+    const notes = shadow.querySelector('#mktero-notes');
+    const toggle = shadow.querySelector('#mktero-notes-toggle');
+    try {
+        view.setNativeSidebarOpen(true);
+        toggle.click();
+        assert.equal(view.nativeSidebarOpen, false);
+        assert.equal(notes.hidden, false);
+        assert.deepEqual(nativeChanges, [{ open: false }]);
+        assert.deepEqual(changes, [{ notes: { visible: true } }]);
+
+        toggle.click();
+        view.setNativeSidebarOpen(false);
+        assert.equal(notes.hidden, true);
+        assert.equal(view.nativeSidebarOpen, false);
+        assert.deepEqual(changes.at(-1), { notes: { visible: false } });
+        assert.deepEqual(nativeChanges, [{ open: false }]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('a failed native close keeps the previous sidebar and notes preference', () => {
+    for (const initiallyVisible of [true, false]) {
+        const changes = [];
+        const { view, shadow } = createView(createModel(), {}, {
+            configureWindow: wideReaderWindow,
+            panelLayout: { notes: { visible: initiallyVisible } },
+            onPanelLayoutChange: change => changes.push(change),
+            onNativeSidebarChange: () => false,
+        });
+        try {
+            view.setNativeSidebarOpen(true);
+            shadow.querySelector('#mktero-notes-toggle').click();
+            assert.equal(view.nativeSidebarOpen, true);
+            assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+            assert.deepEqual(changes, []);
+            view.setNativeSidebarOpen(false);
+            assert.equal(shadow.querySelector('#mktero-notes').hidden, !initiallyVisible);
+        }
+        finally {
+            view.destroy();
+        }
+    }
+});
+
+test('native close exceptions preserve restoration intent and are reported once', () => {
+    const errors = [];
+    const changes = [];
+    const error = new Error('Native sidebar is closing');
+    const { view, shadow } = createView(createModel(), {
+        logError: caught => errors.push(caught),
+    }, {
+        configureWindow: wideReaderWindow,
+        panelLayout: { notes: { visible: false } },
+        onPanelLayoutChange: change => changes.push(change),
+        onNativeSidebarChange() { throw error; },
+    });
+    try {
+        view.setNativeSidebarOpen(true);
+        shadow.querySelector('#mktero-notes-toggle').click();
+        assert.equal(view.nativeSidebarOpen, true);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+        assert.deepEqual(changes, []);
+        assert.deepEqual(errors, [error]);
+        view.setNativeSidebarOpen(false);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('a rejected notes request in focus mode does not leave focus or change the target', () => {
+    const changes = [];
+    const { view, shadow } = createView(createModel(), {}, {
+        configureWindow: wideReaderWindow,
+        onPanelLayoutChange: change => changes.push(change),
+        onNativeSidebarChange: change => change.open !== false,
+    });
+    try {
+        view.setNativeSidebarOpen(true);
+        view.setFocusMode(true);
+        shadow.querySelector('#mktero-notes-toggle').click();
+        assert.equal(view.focusMode, true);
+        assert.equal(view.nativeSidebarOpen, true);
+        assert.deepEqual(changes, []);
+        view.setFocusMode(false);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+        view.setNativeSidebarOpen(false);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, false);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('sidebar yielding preserves the hosted note editor and does not claim focus', async () => {
+    const destroyed = [];
+    let focused = 0;
+    const { view, shadow } = createView(createModel({
+        zoteroNotes: createNotesBridge({
+            canHostEditor: () => true,
+            async mountEditor(_container, { noteID }) {
+                return { noteID, editable: true, destroy: () => destroyed.push(noteID) };
+            },
+        }),
+    }), {}, {
+        configureWindow: wideReaderWindow,
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.focus = () => { focused += 1; };
+            return editor;
+        },
+    });
+    try {
+        await view.zoteroNotesPanel.openNote(12);
+        const handle = view.zoteroNotesPanel.handle;
+        const container = view.zoteroNotesPanel.editorContainer;
+        view.setNativeSidebarOpen(true);
+        view.render(view.model);
+        view.setNativeSidebarOpen(false);
+        assert.equal(view.zoteroNotesPanel.handle, handle);
+        assert.equal(view.zoteroNotesPanel.editorContainer, container);
+        assert.equal(shadow.querySelector('.mktero-zotero-notes-editor-view').hidden, false);
+        assert.deepEqual(destroyed, []);
+        assert.equal(focused, 0);
+    }
+    finally {
+        view.destroy();
+    }
+    assert.deepEqual(destroyed, [12]);
+});
+
+test('responsive restoration waits until the native sidebar has closed', () => {
+    const changes = [];
+    const { document, view, shadow } = createView(createModel(), {}, {
+        configureWindow: wideReaderWindow,
+        onPanelLayoutChange: change => changes.push(change),
+    });
+    const resize = width => {
+        document.defaultView.innerWidth = width;
+        document.defaultView.dispatchEvent(new document.defaultView.Event('resize'));
+    };
+    try {
+        resize(800);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+        view.setNativeSidebarOpen(true);
+        resize(1400);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+        view.setNativeSidebarOpen(false);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, false);
+        assert.deepEqual(changes, []);
+
+        view.setNativeSidebarOpen(true);
+        resize(800);
+        view.setNativeSidebarOpen(false);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+        resize(1400);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, false);
+        assert.deepEqual(changes, []);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('focus mode suspends the complete native sidebar state without changing preferences', () => {
+    for (const initiallyVisible of [true, false]) {
+        const changes = [];
+        const nativeChanges = [];
+        const { view, shadow } = createView(createModel(), {}, {
+            configureWindow: wideReaderWindow,
+            panelLayout: { notes: { visible: initiallyVisible } },
+            onPanelLayoutChange: change => changes.push(change),
+            onNativeSidebarChange: change => nativeChanges.push(change),
+        });
+        try {
+            view.setNativeSidebarOpen(true);
+            view.setFocusMode(true);
+            view.syncResponsiveSidePanels(1400);
+            assert.equal(view.nativeSidebarOpen, true);
+            assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+            assert.equal(shadow.querySelector('#mktero-outline').hidden, true);
+            view.setFocusMode(false);
+            assert.equal(view.nativeSidebarOpen, true);
+            assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+            view.setNativeSidebarOpen(false);
+            assert.equal(shadow.querySelector('#mktero-notes').hidden, !initiallyVisible);
+            assert.deepEqual(changes, []);
+            assert.deepEqual(nativeChanges, [{ focusMode: true }, { focusMode: false }]);
+        }
+        finally {
+            view.destroy();
+        }
+    }
+});
+
+test('explicit notes and native requests exit focus mode and choose the requested sidebar', () => {
+    const nativeChanges = [];
+    const { view, shadow } = createView(createModel(), {}, {
+        configureWindow: wideReaderWindow,
+        onNativeSidebarChange: change => nativeChanges.push(change),
+    });
+    try {
+        view.setNativeSidebarOpen(true);
+        view.setFocusMode(true);
+        shadow.querySelector('#mktero-notes-toggle').click();
+        assert.equal(view.focusMode, false);
+        assert.equal(view.nativeSidebarOpen, false);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, false);
+        assert.deepEqual(nativeChanges, [
+            { focusMode: true }, { open: false }, { focusMode: false },
+        ]);
+
+        view.setFocusMode(true);
+        view.setNativeSidebarOpen(true);
+        assert.equal(view.focusMode, false);
+        assert.equal(view.nativeSidebarOpen, true);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, true);
+        view.setNativeSidebarOpen(false);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, false);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('notes expansion through resizer and insertion uses the same native close request', async () => {
+    const nativeChanges = [];
+    const { view, shadow } = createView(createModel({
+        zoteroNotes: createNotesBridge({
+            canHostEditor: () => true,
+            async mountEditor(_container, { noteID }) {
+                return { noteID, editable: true, insertAnnotations() {}, destroy() {} };
+            },
+        }),
+    }), {}, {
+        configureWindow: wideReaderWindow,
+        onNativeSidebarChange: change => nativeChanges.push(change),
+    });
+    try {
+        await view.zoteroNotesPanel.openNote(12);
+        view.setNativeSidebarOpen(true);
+        dispatchKeyboardEvent(shadow.querySelector('#mktero-notes-resizer'), 'Enter');
+        assert.equal(view.nativeSidebarOpen, false);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, false);
+
+        view.setNativeSidebarOpen(true);
+        dispatchMouseEvent(shadow.querySelector('#mktero-notes-resizer'), 'dblclick', 1000);
+        assert.equal(view.nativeSidebarOpen, false);
+
+        view.setNativeSidebarOpen(true);
+        await view.requireInsertableNote();
+        assert.equal(view.nativeSidebarOpen, false);
+        assert.equal(shadow.querySelector('#mktero-notes').hidden, false);
+        assert.deepEqual(nativeChanges, [{ open: false }, { open: false }, { open: false }]);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('keeps per-view sidebar state isolated and ignores updates after destruction', () => {
+    const nativeChanges = [];
+    const first = createView(createModel(), {}, {
+        configureWindow: wideReaderWindow,
+        onNativeSidebarChange: change => nativeChanges.push(change),
+    });
+    const second = createView(createModel(), {}, { configureWindow: wideReaderWindow });
+    try {
+        first.view.setNativeSidebarOpen(true);
+        assert.equal(first.shadow.querySelector('#mktero-notes').hidden, true);
+        assert.equal(second.shadow.querySelector('#mktero-notes').hidden, false);
+        assert.equal(second.view.nativeSidebarOpen, false);
+        first.view.destroy();
+        first.view.setNativeSidebarOpen(false);
+        first.view.setSidePanelVisibility('notes', true);
+        first.view.setFocusMode(true);
+        assert.deepEqual(nativeChanges, []);
+    }
+    finally {
+        first.view.destroy();
+        second.view.destroy();
+    }
+});
+
+test('visible native sidebar controls keep focus while hidden ones release it', () => {
+    let focused = 0;
+    const { document, view } = createView(createModel({ status: 'ready', markdown: 'Paper' }), {}, {
+        configureWindow: wideReaderWindow,
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.focus = () => { focused += 1; };
+            return editor;
+        },
+    });
+    const tab = document.createElement('div');
+    document.body.appendChild(tab);
+    tab.appendChild(view.root);
+    const pane = document.createElement('aside');
+    pane.id = 'zotero-context-pane';
+    const button = document.createElement('button');
+    pane.appendChild(button);
+    document.body.appendChild(pane);
+    focusElement(document, button);
+    try {
+        view.setNativeSidebarOpen(true);
+        view.focusReadingSurface();
+        assert.equal(focused, 0);
+
+        pane.hidden = true;
+        view.focusReadingSurface();
+        assert.equal(focused, 1);
+        pane.hidden = false;
+        pane.setAttribute('collapsed', 'true');
+        view.focusReadingSurface();
+        assert.equal(focused, 2);
+        pane.removeAttribute('collapsed');
+        view.setNativeSidebarOpen(false);
+        view.focusReadingSurface();
+        assert.equal(focused, 3);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('native sidebar controls and plugin frames keep their search and annotation shortcuts', () => {
+    const { document, view, shadow } = createView(createModel({
+        status: 'ready', markdown: '# Overview\n\nPaper',
+    }), {}, { configureWindow: wideReaderWindow });
+    document.body.appendChild(view.root);
+    view.host.getClientRects = () => [{ width: 800, height: 600 }];
+    const pane = document.createElement('aside');
+    pane.id = 'zotero-context-pane';
+    const button = document.createElement('button');
+    const frame = document.createElement('iframe');
+    const frameDocument = parseHTML('<html><body><div id="plugin"></div></body></html>').document;
+    Object.defineProperty(frame, 'contentDocument', { value: frameDocument });
+    pane.append(button, frame);
+    document.body.appendChild(pane);
+    try {
+        view.setNativeSidebarOpen(true);
+        focusElement(document, button);
+        const find = dispatchShortcut(button, { key: 'f', metaKey: true });
+        const annotation = dispatchShortcut(button, { key: 'n', altKey: true });
+        assert.equal(find.defaultPrevented, false);
+        assert.equal(annotation.defaultPrevented, false);
+        assert.equal(view.documentSearchOpen, false);
+
+        focusElement(document, view.host);
+        const pluginFind = dispatchShortcut(shadow.querySelector('#mktero-content'), {
+            key: 'f', metaKey: true, originalTarget: frameDocument.getElementById('plugin'),
+        });
+        const pluginAnnotation = dispatchShortcut(shadow.querySelector('#mktero-content'), {
+            key: 'n', altKey: true, originalTarget: frameDocument.getElementById('plugin'),
+        });
+        assert.equal(pluginFind.defaultPrevented, false);
+        assert.equal(pluginAnnotation.defaultPrevented, false);
+        assert.equal(view.documentSearchOpen, false);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('a hidden hosted note releases focus while the native sidebar uses its space', async () => {
+    const { document, view } = createView(createModel({
+        zoteroNotes: createNotesBridge({
+            canHostEditor: () => true,
+            async mountEditor(container, { noteID }) {
+                const frame = container.ownerDocument.createElement('iframe');
+                container.appendChild(frame);
+                return { noteID, editable: true, destroy() {} };
+            },
+        }),
+    }), {}, { configureWindow: wideReaderWindow });
+    document.body.appendChild(view.root);
+    try {
+        await view.zoteroNotesPanel.openNote(12);
+        focusElement(document, view.zoteroNotesPanel.editorContainer.querySelector('iframe'));
+        assert.equal(view.shouldLeaveFocusAlone(), true);
+        view.setNativeSidebarOpen(true);
+        assert.equal(view.shouldLeaveFocusAlone(), false);
+        view.setNativeSidebarOpen(false);
+        assert.equal(view.shouldLeaveFocusAlone(), true);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
+test('a failed native close refuses note insertion and creation without writing elsewhere', async () => {
+    const created = [];
+    const { view } = createView(createModel({
+        zoteroNotes: createNotesBridge({
+            async list() {
+                return { status: 'ready', notes: [], editable: true, annotationCount: 2 };
+            },
+            canHostEditor: () => true,
+            async mountEditor(_container, { noteID }) {
+                return { noteID, editable: true, insertAnnotations() {}, destroy() {} };
+            },
+            async createFromAnnotations() { created.push(true); },
+        }),
+    }), {}, {
+        configureWindow: wideReaderWindow,
+        onNativeSidebarChange: () => false,
+    });
+    try {
+        await flushView();
+        await view.zoteroNotesPanel.openNote(12);
+        view.setNativeSidebarOpen(true);
+        await assert.rejects(view.requireInsertableNote(), {
+            code: 'MKTERO_NOTE_EDITOR_UNAVAILABLE',
+        });
+        await assert.rejects(view.createNoteFromAnnotations(), {
+            code: 'MKTERO_NOTE_EDITOR_UNAVAILABLE',
+        });
+        assert.deepEqual(created, []);
+        assert.equal(view.nativeSidebarOpen, true);
     }
     finally {
         view.destroy();

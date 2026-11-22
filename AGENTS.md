@@ -138,10 +138,37 @@ documentation-only. Report any command that could not be run.
 - Mktero stores no notes. Notes are Zotero note items edited with Zotero's own
   `note-editor`; do not add a note store, a rich-text editor, or a note cache.
   The reader does not mix in other libraries or other papers' child notes.
-- Do not patch Zotero's context pane (`_hasContextPaneTypes` in 8.0 to 10.0,
-  the hardcoded `'reader'` check in 7.0). The Mktero tab hosts its own
-  `note-editor`, hides the leftover context pane while selected, and falls
-  back to Zotero's note window when the editor cannot be hosted.
+- A window-local context-pane bridge creates and selects the current PDF's
+  item context under the real Mktero tab ID. Keep the tab and item context
+  type `mktero`; do not patch `_hasContextPaneTypes` or Zotero 7's hardcoded
+  `'reader'` eligibility check, and do not fabricate a Reader.
+- Scope bridge contexts to their owning window, tab ID, and source item ID.
+  Guard asynchronous setup against tab switches, source changes, close, and
+  disposal so stale work cannot select another paper's context. Release item
+  contexts when their tab closes; on window unload or shutdown, disconnect
+  observers, remove owned styles and attributes, restore wrapped methods only
+  if still owned, and restore the previous native pane state. Switching away
+  from Mktero must return control to Zotero's own pane.
+- Context data must not make Mktero a reusable PDF reader tab. Exclude Mktero
+  tabs from item-ID tab lookups used by `Reader.open`, preserving real PDF
+  matches. Opening a PDF or following a note citation must reach a real Reader
+  rather than reuse the Markdown tab. Preserve Mktero's presenter-owned title
+  when native item notifications rename tabs.
+- The native sidebar and Mktero Notes show mutually exclusive content. A
+  native open temporarily hides Notes without destroying its editor; a native
+  close restores the prior Notes intent. Explicitly opening Notes first closes
+  the native sidebar; if that fails, retain the prior state and preferences.
+  If both were closed, keep both closed. Automatic layout changes must not
+  write `readerNotesVisible`; focus mode and tab suspension are independent
+  and must not be interpreted as user closes. Ignore bridge-owned mutations
+  during setup, redraw, and restoration when observing native expansion.
+- The native notes panel currently provides library-level browsing in Mktero.
+  Keep paper-specific note interactions in Mktero Notes because Zotero's
+  corresponding native actions depend on a PDF Reader. Continue using ordinary
+  Zotero note items and the native `note-editor`, with Zotero's note window as
+  fallback when hosting is unavailable. Third-party features requiring a real
+  Reader or PDF selections are not automatically compatible; do not claim
+  support for every plugin.
 - `Add to Note` goes through the editor instance's `insertAnnotations()` and
   needs a PDF position. Refuse an annotation or selection the PDF index cannot
   locate instead of inserting text without a source. Never target or list a

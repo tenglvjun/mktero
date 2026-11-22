@@ -38,24 +38,15 @@ import {
     removeStaleMkteroSessionTabs,
 } from './mktero-session-tabs.js';
 
+import {
+    createZoteroContextPane,
+    MKTERO_TAB_SELECTED_ATTRIBUTE,
+} from './zotero-context-pane.js';
+export { MKTERO_TAB_SELECTED_ATTRIBUTE };
+
 const TAB_TYPE = 'mktero';
 const TAB_ICON = 'markdown';
 const TAB_ICON_STYLE_ID = 'mktero-markdown-tab-icon-style';
-const CONTEXT_PANE_STYLE_ID = 'mktero-context-pane-style';
-export const MKTERO_TAB_SELECTED_ATTRIBUTE = 'mktero-tab-selected';
-// Zotero updates its context pane only for reader and note tabs (Zotero 7.0
-// checks for 'reader'; 8.0 to 10.0 use Zotero_Tabs._hasContextPaneTypes). On
-// a Mktero tab the pane would keep showing the tab selected before it, with
-// another paper's notes. While a Mktero tab is selected the pane is hidden;
-// the tab shows its own notes column. Nothing of Zotero's state is changed,
-// so the pane comes back as it was when another tab is selected.
-const CONTEXT_PANE_CSS = `
-:root[${MKTERO_TAB_SELECTED_ATTRIBUTE}] #zotero-context-splitter,
-:root[${MKTERO_TAB_SELECTED_ATTRIBUTE}] #zotero-context-splitter-stacked,
-:root[${MKTERO_TAB_SELECTED_ATTRIBUTE}] #zotero-context-pane {
-    display: none !important;
-}
-`;
 const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
 
 export const MARKDOWN_TAB_CLOSE_REASONS = Object.freeze({
@@ -69,11 +60,13 @@ export class MarkdownTabPresenter {
         zotero,
         rootURI,
         createView = createMarkdownTabView,
+        createContextPane = createZoteroContextPane,
         localization = createLocalization(),
     }) {
         this.zotero = zotero;
         this.rootURI = rootURI;
         this.createView = createView;
+        this.createContextPane = createContextPane;
         this.localization = localization;
         this.readerFont = getMarkdownReaderFont(zotero);
         this.readerFontSize = getMarkdownReaderFontSize(zotero);
@@ -112,7 +105,7 @@ export class MarkdownTabPresenter {
         this.sessionStateTabs = null;
         this.disposeSessionStateFilter = null;
         this.tabIconStyle = null;
-        this.contextPaneWindows = new Set();
+        this.contextPanes = new Map();
         this.tabNotifierID = null;
         this.removeStaleSessionTabs();
         this.ensureSessionStateFilter();
@@ -187,6 +180,9 @@ export class MarkdownTabPresenter {
             if (sourceItemID !== null && sourceItemID !== undefined) {
                 existing.model.itemID = sourceItemID;
                 existing.model.sourceItemID = sourceItemID;
+                existing.tabData.itemID = sourceItemID;
+                existing.tabData.mkteroSourceItemID = sourceItemID;
+                this.contextPanes.get(existing.owner)?.update(existing);
                 this.closeForSourceItem(sourceItemID, {
                     exceptDocumentID: documentID,
                 });
@@ -396,6 +392,7 @@ export class MarkdownTabPresenter {
             },
             this.localization.t.bind(this.localization)
         );
+        let presentation;
         const view = this.createView({
             document: owner.document,
             rootURI: this.rootURI,
@@ -423,23 +420,35 @@ export class MarkdownTabPresenter {
             ),
             panelLayout: getMarkdownReaderPanelLayout(this.zotero),
             onPanelLayoutChange: changes => this.updatePanelLayout(changes),
+            onNativeSidebarChange: change => {
+                if (!presentation) return false;
+                const contextPane = this.contextPanes.get(owner);
+                if (typeof change.open === 'boolean') {
+                    return contextPane?.setOpen(presentation, change.open) ?? false;
+                }
+                if (typeof change.focusMode === 'boolean') {
+                    return contextPane?.setFocusMode(presentation, change.focusMode) ?? false;
+                }
+                return true;
+            },
         });
         view.render(model);
         this.closeForSourceItem(sourceItemID, {
             exceptDocumentID: documentID,
         });
-        let presentation;
+        const tabData = {
+            itemID: sourceItemID,
+            mkteroItemID: documentID,
+            mkteroDocumentID: documentID,
+            mkteroSourceItemID: sourceItemID,
+            icon: TAB_ICON,
+        };
         let tabID;
         try {
             const result = tabs.add({
                 type: TAB_TYPE,
                 title: model.title,
-                data: {
-                    mkteroItemID: documentID,
-                    mkteroDocumentID: documentID,
-                    mkteroSourceItemID: sourceItemID,
-                    icon: TAB_ICON,
-                },
+                data: tabData,
                 select: true,
                 preventJumpback: true,
                 onClose: () => {
@@ -453,6 +462,11 @@ export class MarkdownTabPresenter {
             });
             tabID = result.id;
             result.container.appendChild(view.root);
+            presentation = {
+                owner, tabs, tabID, tabData, documentID, view, model,
+                closed: false, closeReason: null, onClose,
+            };
+            this.presentations.set(documentID, presentation);
             // The deck element is what Zotero notifies when this tab is
             // selected. The first select already happened inside add().
             result.container.onTabSelectionChanged = selected => {
@@ -463,23 +477,11 @@ export class MarkdownTabPresenter {
             this.syncContextPane(owner);
         }
         catch (error) {
-            view.destroy?.();
+            if (presentation) this.finishPresentation(presentation, MARKDOWN_TAB_CLOSE_REASONS.USER);
+            else view.destroy?.();
             if (tabID) tabs.close?.(tabID);
             throw error;
         }
-
-        presentation = {
-            owner,
-            tabs,
-            tabID,
-            documentID,
-            view,
-            model,
-            closed: false,
-            closeReason: null,
-            onClose,
-        };
-        this.presentations.set(documentID, presentation);
 
         this.debug('Opened inline Markdown view for document ' + documentID);
 
@@ -495,6 +497,9 @@ export class MarkdownTabPresenter {
             current.tabs.rename?.(current.tabID, changes.title);
         }
         current.view.render(current.model);
+        current.tabData.itemID = current.model.sourceItemID;
+        current.tabData.mkteroSourceItemID = current.model.sourceItemID;
+        this.contextPanes.get(current.owner)?.update(current);
     }
 
     get(documentID) {
@@ -752,6 +757,12 @@ export class MarkdownTabPresenter {
         // the document up, so the document is forgotten only afterwards.
         if (first) {
             try {
+                this.contextPanes.get(presentation.owner)?.release(presentation);
+            }
+            catch (error) {
+                this.zotero.logError?.(error);
+            }
+            try {
                 presentation.view.destroy?.();
             }
             catch (error) {
@@ -805,76 +816,44 @@ export class MarkdownTabPresenter {
     }
 
     ensureContextPaneStyle(window) {
-        const document = window?.document;
-        if (!document?.documentElement?.appendChild || !document.createElementNS) {
-            return;
+        if (!this.contextPanes.has(window)) {
+            this.contextPanes.set(window, this.createContextPane({ window, zotero: this.zotero }));
         }
-        if (!document.getElementById?.(CONTEXT_PANE_STYLE_ID)) {
-            const style = document.createElementNS(XHTML_NAMESPACE, 'style');
-            style.setAttribute('id', CONTEXT_PANE_STYLE_ID);
-            style.textContent = CONTEXT_PANE_CSS;
-            document.documentElement.appendChild(style);
-        }
-        this.contextPaneWindows.add(window);
+        return this.contextPanes.get(window);
     }
 
-    // Marks the window while its selected tab is a Mktero tab. Zotero does
-    // not move focus out of its context pane when such a tab is selected, so
-    // focus left in the hidden pane (a note of the previous tab's paper) is
-    // released; the reader claims the keyboard after its own selection.
     syncContextPane(window) {
-        const document = window?.document;
-        const root = document?.documentElement;
-        if (!root?.toggleAttribute) return;
-        let mktero = false;
-        try {
-            mktero = window.Zotero_Tabs?.selectedType === TAB_TYPE;
-        }
-        catch {
-            mktero = false;
-        }
-        root.toggleAttribute(MKTERO_TAB_SELECTED_ATTRIBUTE, mktero);
-        if (!mktero) return;
-        try {
-            const pane = document.getElementById?.('zotero-context-pane');
-            const active = document.activeElement;
-            if (pane && active && active !== root && pane.contains?.(active)) {
-                active.blur?.();
-            }
-        }
-        catch {
-            // A window that is closing can throw on access.
-        }
+        const contextPane = this.contextPanes.get(window);
+        if (!contextPane) return;
+        const tabs = window.Zotero_Tabs;
+        const presentation = tabs?.selectedType === TAB_TYPE
+            ? [...this.presentations.values()].find(entry => (
+                !entry.closed && entry.owner === window && entry.tabID === tabs.selectedID
+            )) || null
+            : null;
+        void contextPane.select(presentation);
     }
 
     releaseContextPane(window) {
-        this.contextPaneWindows.delete(window);
+        const contextPane = this.contextPanes.get(window);
+        this.contextPanes.delete(window);
         try {
-            const document = window?.document;
-            document?.documentElement?.removeAttribute?.(
-                MKTERO_TAB_SELECTED_ATTRIBUTE
-            );
-            document?.getElementById?.(CONTEXT_PANE_STYLE_ID)?.remove?.();
+            contextPane?.dispose();
         }
         catch {
-            // A closing window can throw on access; it takes its DOM along.
+            // A closing chrome window can already deny DOM access.
         }
     }
 
     syncContextPanes() {
-        for (const window of [...this.contextPaneWindows]) {
-            let closed = true;
+        for (const window of [...this.contextPanes.keys()]) {
             try {
-                closed = window.closed === true;
+                if (window.closed === true) this.releaseContextPane(window);
+                else this.syncContextPane(window);
             }
             catch {
-                closed = true;
+                this.releaseContextPane(window);
             }
-            if (closed) {
-                this.contextPaneWindows.delete(window);
-                continue;
-            }
-            this.syncContextPane(window);
         }
     }
 
@@ -908,7 +887,7 @@ export class MarkdownTabPresenter {
             }
             this.tabNotifierID = null;
         }
-        for (const window of [...this.contextPaneWindows]) {
+        for (const window of [...this.contextPanes.keys()]) {
             this.releaseContextPane(window);
         }
     }
