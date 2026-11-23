@@ -84,6 +84,8 @@ The lookup retries with a cleaned title if a full citation is too noisy. It also
 
 Missing references with a reliable DOI, arXiv ID, or PMID use Zotero's native translator. Confirmed OpenAlex-only records, including books, are created directly from their bounded metadata. If the target library permits files, Mktero also tries an arXiv or configured open-access PDF; the metadata remains available if that download fails.
 
+Numbered references can continue across multiple References sections. Citations in the main text and intervening sections such as Methods can link to either part. An explicitly labeled appendix or supplement that restarts numbering resolves its citations within that section.
+
 Grouped author-year citations resolve every matched bibliography entry, including ACM/natbib square-bracket forms such as `Lewis et al. [2020]` and `[Kirkpatrick et al., 2017; Wei et al., 2026]`. If conversion inserts a stray heading inside an APA-style bibliography, the reference list continues only when multiple bibliography-shaped entries clearly resume after it. A genuine author note still ends the list.
 
 ### Snapshot attachments

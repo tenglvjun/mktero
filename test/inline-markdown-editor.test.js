@@ -6181,6 +6181,42 @@ test('keeps LaTeX superscript citations interactive instead of rendering math', 
     dom.window.close();
 });
 
+test('opens citation previews for entries on either side of Methods', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '# Paper',
+        'Early work $^{1-2}$ supports the result.',
+        '## References',
+        '1. Alpha A. First paper. 2020.',
+        '## Methods',
+        'The protocol builds on early work $^{1}$ and a later study $^{2}$.',
+        '## References',
+        '2. Beta B. Second paper. 2021.',
+    ].join('\n\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+
+    const citations = [...document.querySelectorAll('.cm-mktero-citation')];
+    assert.deepEqual(
+        citations.map(citation => citation.getAttribute('data-citation-ids')),
+        ['number:1 number:2', 'number:1', 'number:2']
+    );
+    hoverReference(dom.window, citations[0]);
+    const items = [...document.querySelectorAll('.mktero-citation-popup-item')];
+    assert.equal(items.length, 2);
+    assert.match(items[0].textContent, /First paper/);
+    assert.match(items[1].textContent, /Second paper/);
+    assert.equal(editor.getMarkdown(), markdown);
+
+    editor.destroy();
+    dom.window.close();
+});
+
 test('hovers LaTeX superscript citations with bare numbered references', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
