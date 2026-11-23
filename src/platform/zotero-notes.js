@@ -9,6 +9,7 @@ import {
     NOTE_ANNOTATION_NOT_IN_PDF,
     NOTE_EDITOR_UNAVAILABLE,
     NOTE_NO_PARENT_ITEM,
+    NOTE_REVIEW_UNCONFIRMED,
     NOTE_TARGET_CHANGED,
     noteBridgeError,
     NOTES_UNAVAILABLE,
@@ -19,7 +20,8 @@ import {
     replaceNoteMathPlaceholders,
     rewriteNoteHighlightMath,
 } from '../core/zotero-note-math.js';
-import { noteCaretAfterInsert } from '../core/zotero-note-caret.js';
+import { insertedTopLevelRange, noteCaretAfterInsert } from '../core/zotero-note-caret.js';
+import { readResearchNoteExcerpts, researchNoteReviewHTML } from '../core/research-note-excerpts.js';
 import { noteMathClipboardHTML } from '../markdown/zotero-note-clipboard.js';
 import {
     noteMathSegmentsText,
@@ -196,8 +198,80 @@ export function createZoteroNotes(zotero, {
         return item;
     };
 
+    const requireResearchNote = async (attachmentID, noteID) => {
+        const target = await getResearchNote(attachmentID);
+        if (target.note?.id !== noteID || !['ready', 'readonly'].includes(target.status)) {
+            throw noteBridgeError(NOTE_TARGET_CHANGED, 'The research note destination changed');
+        }
+        return target;
+    };
+
+    const resolveExcerptPDF = async (uri, libraryID) => {
+        let pdf;
+        try {
+            pdf = await zotero.URI?.getURIItem?.(uri);
+        }
+        catch {
+            return null;
+        }
+        return pdf?.libraryID === libraryID && pdf.isPDFAttachment?.()
+            && !pdf.deleted && !parentFor(pdf)?.deleted ? pdf : null;
+    };
+
+    const excerptPDFIsAvailable = async pdf => {
+        try {
+            return Boolean(pdf && (typeof pdf.fileExists !== 'function' || await pdf.fileExists()));
+        }
+        catch {
+            return false;
+        }
+    };
+
+    const researchExcerpts = async (html, libraryID, excerptIDs = null) => {
+        const pdfs = new Map();
+        const excerpts = readResearchNoteExcerpts(html, { parseHTML });
+        const selected = excerptIDs ? excerpts.filter(row => excerptIDs.has(row.id)) : excerpts;
+        return Promise.all(selected.map(async row => {
+            const uri = row.source.attachmentURI;
+            if (!pdfs.has(uri)) {
+                pdfs.set(uri, (async () => {
+                    const pdf = await resolveExcerptPDF(uri, libraryID);
+                    return {
+                        title: parentFor(pdf)?.getField?.('title') || pdf?.getField?.('title') || '',
+                        pdfID: pdf?.id ?? null,
+                        available: await excerptPDFIsAvailable(pdf),
+                    };
+                })());
+            }
+            return { ...row, ...await pdfs.get(uri) };
+        }));
+    };
+
+    const listResearchNoteExcerpts = async (attachmentID, noteID, { editorHandle } = {}) => {
+        const target = await requireResearchNote(attachmentID, noteID);
+        const note = zotero.Items.get(noteID);
+        const matchingEditor = editorHandle?.noteID === noteID && !editorHandle.isGone?.();
+        const live = matchingEditor ? editorHandle.readReviewSnapshot?.() : null;
+        const excerpts = await researchExcerpts(live ?? note?.getNote?.() ?? '', target.libraryID);
+        await requireResearchNote(attachmentID, noteID);
+        return { excerpts, savedOnly: Boolean(matchingEditor && live === null) };
+    };
+
     return {
         getResearchNote,
+        listResearchNoteExcerpts,
+
+        async openResearchNoteExcerpt(attachmentID, noteID, excerptID, {
+            editorHandle, window, isCurrent = () => true,
+        } = {}) {
+            const { excerpts } = await listResearchNoteExcerpts(attachmentID, noteID, { editorHandle });
+            const row = excerpts.find(excerpt => excerpt.id === excerptID);
+            const pane = (window?.ZoteroPane ? window : getMainWindow())?.ZoteroPane;
+            if (!row?.available || !pane?.viewPDF || !isCurrent()) {
+                throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The excerpt source is unavailable');
+            }
+            return pane.viewPDF(row.pdfID, { position: row.source.position });
+        },
 
         async createResearchNote(attachmentID, { title = '' } = {}) {
             const attachment = attachmentFor(attachmentID);
@@ -437,6 +511,7 @@ export function createZoteroNotes(zotero, {
                 delay,
                 isDestroyed: () => destroyed,
             });
+            let appendingReview = false;
             return {
                 get noteID() {
                     return item.id || null;
@@ -447,6 +522,45 @@ export function createZoteroNotes(zotero, {
                 isGone,
                 get editable() {
                     return currentEditable();
+                },
+                readReviewSnapshot() {
+                    return readNoteReviewSnapshot(editor.getCurrentInstance?.());
+                },
+                async appendResearchNoteReview(excerptIDs, labels, isCurrent) {
+                    if (appendingReview) return;
+                    appendingReview = true;
+                    try {
+                        requireEditable();
+                        const editorInstance = await instance();
+                        const before = noteEditorSnapshot(editor, editorInstance);
+                        const html = readNoteReviewSnapshot(editorInstance);
+                        if (!before || html === null || typeof editorInstance._postMessage !== 'function') {
+                            throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The editor cannot append a review');
+                        }
+                        const ids = new Set(excerptIDs);
+                        const excerpts = await researchExcerpts(html, libraryID, ids);
+                        if (!ids.size || excerpts.length !== ids.size || excerpts.some(row => !row.available)) {
+                            throw noteBridgeError(NOTE_TARGET_CHANGED, 'The selected excerpts changed');
+                        }
+                        const content = researchNoteReviewHTML(excerpts, labels, { parseHTML });
+                        await requireResearchNote(attachmentID, item.id);
+                        requireEditable();
+                        const current = findNoteEditorView(editor);
+                        if (!isCurrent() || current !== before.view || current.state.doc !== before.doc) {
+                            throw noteBridgeError(NOTE_TARGET_CHANGED, 'The note changed before the review was inserted');
+                        }
+                        editorInstance._postMessage({
+                            action: 'insertHTML',
+                            pos: before.doc.content.size,
+                            html: content,
+                        });
+                        await confirmResearchNoteReview(editor, before, labels, {
+                            delay, isCurrent, isDestroyed: () => destroyed,
+                        });
+                    }
+                    finally {
+                        appendingReview = false;
+                    }
                 },
                 // `segmentsFor(annotation, index)` may give the text and
                 // formulas of an annotation, so the note shows its formulas.
@@ -919,6 +1033,49 @@ function findNoteEditorView(editor, instance = editor?.getCurrentInstance?.()) {
 function noteEditorSnapshot(editor, instance) {
     const view = findNoteEditorView(editor, instance);
     return view ? { view, doc: view.state.doc } : null;
+}
+
+function readNoteReviewSnapshot(instance) {
+    try {
+        const frame = instance?._iframeWindow;
+        const html = (frame?.wrappedJSObject || frame)?.getDataSync?.(false)?.html;
+        return typeof html === 'string' ? html : null;
+    }
+    catch {
+        return null;
+    }
+}
+
+async function confirmResearchNoteReview(editor, before, labels, {
+    delay, isCurrent, isDestroyed,
+}) {
+    const attempts = Math.ceil(NOTE_CARET_WAIT_MS / EDITOR_INSTANCE_POLL_MS);
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        if (isDestroyed() || !isCurrent()) return;
+        const view = findNoteEditorView(editor);
+        if (view !== before.view) break;
+        const { state } = view;
+        const range = insertedTopLevelRange(before.doc, state.doc);
+        const start = range?.startIndex;
+        if (start !== undefined && range.endIndex > start + 2
+            && state.doc.child(start).textContent === labels.title
+            && state.doc.child(start + 1).textContent === labels.question
+            && state.doc.child(start + 2).isTextblock) {
+            const Selection = state.selection?.constructor;
+            if (typeof Selection?.near === 'function') {
+                let pos = 1;
+                for (let index = 0; index < start + 2; index++) {
+                    pos += state.doc.child(index).nodeSize;
+                }
+                const selection = Selection.near(state.doc.resolve(pos), 1);
+                view.dispatch(state.tr.setSelection(selection).scrollIntoView());
+            }
+            view.focus?.();
+            return;
+        }
+        await delay(EDITOR_INSTANCE_POLL_MS);
+    }
+    throw noteBridgeError(NOTE_REVIEW_UNCONFIRMED, 'Review insertion could not be confirmed');
 }
 
 // Waits for the insert the editor received as a message, then puts the caret

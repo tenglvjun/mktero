@@ -5,7 +5,7 @@ import { userInfo } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export const zoteroApp = '/Applications/Zotero.app';
+export const zoteroApp = path.resolve(process.env.MKTERO_TEST_ZOTERO_APP || '/Applications/Zotero.app');
 const sandbox = '/usr/bin/sandbox-exec';
 const perl = '/usr/bin/perl5.34';
 

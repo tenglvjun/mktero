@@ -17,7 +17,7 @@ export const fixturePrefs = {
 export async function prepareFixtures(run, profile) {
     // Reuse the existing synthetic PDFs and Mistral Markdown cache. Their
     // translations are local mock output; this harness reads the original view.
-    const prepared = await prepareSentenceFixtures(run, profile);
+    const prepared = await prepareSentenceFixtures(run, profile, { secondPageForUnaligned: true });
     assert.equal(prepared.length, 2);
     const pdfs = await Promise.all(prepared.map(async (fixture, index) => {
         const pdf = await readFile(fixture.pdfPath);
@@ -26,6 +26,7 @@ export async function prepareFixtures(run, profile) {
         return {
             label: index === 0 ? 'A' : 'B',
             pdfPath: fixture.pdfPath,
+            pageIndex: index,
             markdown: fixture.markdown,
             quote: fixture.sentences[0],
             followupQuote: fixture.sentences[1],

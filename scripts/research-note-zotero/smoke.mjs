@@ -87,9 +87,9 @@ export async function runSmoke(config) {
             for (const [index, quote] of [fixture.quote, fixture.followupQuote].entries()) {
                 const annotation = await Zotero.Annotations.saveFromJSON(pdf, {
                     key: Zotero.DataObjectUtilities.generateKey(), type: 'highlight',
-                    text: quote, comment: '', color: '#ffd400', pageLabel: '1',
+                    text: quote, comment: '', color: '#ffd400', pageLabel: String(fixture.pageIndex + 1),
                     sortIndex: `00000|${String(index * 100).padStart(6, '0')}|00000`,
-                    position: { pageIndex: 0, rects: [[40 + index * 210, 117, 245 + index * 210, 132]] },
+                    position: { pageIndex: fixture.pageIndex, rects: [[40 + index * 210, 117, 245 + index * 210, 132]] },
                 });
                 annotations.push({ id: annotation.id, key: annotation.key, quote });
             }
@@ -244,6 +244,10 @@ export async function runSmoke(config) {
         await leaveEditor(a);
         await selectReader(b);
         await leaveEditor(b);
+        await waitForSavedEvidence();
+        await stage('adding a text selection and rereading across the two PDFs');
+        await addReviewSelection(b);
+        await rereadExcerpts(b);
         const contentHTML = await waitForSavedEvidence();
         await verifyFixtureItems();
         state.contentHTML = contentHTML;
@@ -273,10 +277,13 @@ export async function runSmoke(config) {
             await recordLayout(reader, `restored-target-${fixture.label}`);
             checks.push({ check: 'restart-target-without-editor', pdf: fixture.label, passed: true });
             if (fixture.label !== 'B') continue;
+            await stage('B: revisiting saved source positions after normal restart');
+            await rereadExcerpts(reader, { afterRestart: true });
             await stage('B: Continue opens the restored note and both PDFs evidence');
             await click(reader.root, '.mktero-research-note-continue', 'Continue research note title');
-            await waitForEditorEvidence(reader);
+            const { surface } = await waitForEditorEvidence(reader);
             await captureWindow('phase-2-restored-continue-B');
+            await revisitNativeReview(reader, surface);
             checks.push({ check: 'continue-via-title-control', pdf: 'B', noteID: state.note.id,
                 editorEvidenceFrom: ['A', 'B'], passed: true });
             await leaveEditor(reader);
@@ -620,7 +627,137 @@ export async function runSmoke(config) {
             nativeKeyboardInput: true, thoughtOutsideExcerpt: true, passed: true });
         if (state.userThoughts.length === 1) await captureWindow('phase-1-natural-continuation-after-dismiss');
         state.expectedEvidence.push({ label: fixture.label, quote: annotation.quote,
-            annotationKey: annotation.key, attachmentURI: fixture.attachmentURI });
+            annotationKey: annotation.key, attachmentURI: fixture.attachmentURI, pageIndex: fixture.pageIndex });
+    }
+
+    async function addReviewSelection(reader) {
+        await click(reader.root, '.mktero-research-note-continue', 'B Continue before selecting a passage');
+        const mounted = await waitForEditor(reader);
+        await moveCaretToEnd(mounted);
+        const text = 'silver gauge';
+        // Seed the same keyless source that Zotero stores for a selection which
+        // was sent directly to a note without creating a PDF annotation.
+        const fixture = state.pdfs[1];
+        await mounted.editor.getCurrentInstance().insertAnnotations([{
+            type: 'highlight', attachmentItemID: fixture.id, text, color: '#ffd400',
+            pageLabel: String(fixture.pageIndex + 1),
+            position: { pageIndex: fixture.pageIndex, rects: [[240, 117, 315, 132]] },
+        }]);
+        await wait(() => [...mounted.surface.querySelectorAll('p')].some(node => (
+            node.textContent.includes(text) && node.textContent.length <= text.length + 4
+        )), 'ordinary selection in the note editor');
+        await leaveEditor(reader);
+        await wait(async () => {
+            const note = new win.DOMParser().parseFromString(await savedHTML(), 'text/html');
+            return [...note.querySelectorAll('[data-annotation]')].some(node => {
+                const metadata = JSON.parse(decodeURIComponent(node.getAttribute('data-annotation')));
+                return !metadata.annotationKey && node.textContent.includes(text);
+            });
+        }, 'ordinary selection with a saved PDF position');
+    }
+
+    async function rereadExcerpts(reader, { afterRestart = false } = {}) {
+        const excerpts = [state.expectedEvidence[0], {
+            quote: 'silver gauge', attachmentURI: state.pdfs[1].attachmentURI, pageIndex: state.pdfs[1].pageIndex,
+        }];
+        await click(reader.root, '.mktero-research-note-reread', 'Reread Excerpts');
+        for (const [index, excerpt] of excerpts.entries()) {
+            const rowIndex = await wait(() => {
+                const rows = [...reader.root.querySelectorAll('.mktero-review-row')];
+                const index = rows.findIndex(row => {
+                    const text = row.querySelector('label')?.textContent;
+                    return text?.includes(excerpt.quote) && text.length <= excerpt.quote.length + 4;
+                });
+                return index >= 0 && index + 1;
+            }, 'excerpt with source ' + excerpt.quote);
+            if (!afterRestart) {
+                await click(reader.root, `.mktero-review-row:nth-child(${rowIndex}) input`, 'select excerpt for rereading');
+            }
+            await click(reader.root, `.mktero-review-row:nth-child(${rowIndex}) .mktero-review-source`, 'open excerpt PDF');
+            const fixture = state.pdfs[index];
+            await waitForSourcePDF(fixture, excerpt.pageIndex);
+            await selectReader(reader);
+        }
+        if (afterRestart) {
+            await click(reader.root, '.mktero-review-back', 'back from restored rereading');
+            checks.push({ check: 'restart-rereading-jumps-to-both-real-pdf-pages', passed: true });
+            return;
+        }
+        await captureWindow('phase-1-reread-excerpts');
+        await click(reader.root, '.mktero-review-append', 'Record in Note');
+        const { surface } = await waitForEditor(reader);
+        const question = 'What changes after measuring later?';
+        const reason = 'The second paper measures the result at another time.';
+        await wait(() => {
+            const selection = surface.ownerDocument.getSelection();
+            const questionLabel = [...surface.querySelectorAll('h3')].find(node => node.textContent === 'Current Question');
+            return surface.textContent.includes('Rereading Record')
+                && surface.ownerDocument.activeElement === surface
+                && questionLabel?.nextElementSibling?.contains(selection?.anchorNode);
+        }, 'record appended and caret placed in the current question');
+        const frameWindow = surface.ownerDocument.defaultView;
+        const nativeEditor = (frameWindow.wrappedJSObject || frameWindow)._currentEditorInstance;
+        if (typeof nativeEditor?.doUndo === 'function') {
+            check(nativeEditor.doUndo(), 'Native undo was unavailable after insertion');
+            check(!surface.textContent.includes('Rereading Record')
+                && editorHasEvidence({ surface }, state.expectedEvidence),
+            'One native undo must remove the record and keep the existing note');
+            check(nativeEditor.doRedo(), 'Native redo was unavailable after undoing the record');
+            const heading = [...surface.querySelectorAll('h3')].find(node => node.textContent === 'Current Question');
+            check(heading?.nextElementSibling, 'Native redo did not restore the whole record');
+            surface.ownerDocument.getSelection().collapse(heading.nextElementSibling, 0);
+            await wait(() => heading.nextElementSibling.contains(surface.ownerDocument.getSelection().anchorNode),
+                'position in the restored question paragraph');
+            checks.push({ check: 'native-editor-undo-and-redo-treat-review-as-one-operation', passed: true });
+        }
+        for (const character of question) nativeKey(frameWindow, character);
+        await wait(() => surface.textContent.includes(question), 'native keyboard typed the current question');
+        const questionLabel = [...surface.querySelectorAll('h3')].find(node => node.textContent === 'Current Question');
+        check(questionLabel?.nextElementSibling?.textContent === question, 'The question caret was outside the question field');
+        await moveCaretToEnd({ surface });
+        for (const character of reason) nativeKey(frameWindow, character);
+        await wait(() => surface.textContent.includes(reason), 'native keyboard typed the revision reason');
+        state.review = { excerpts, question, reason };
+        await leaveEditor(reader);
+        checks.push({ check: 'rereading-appends-sourced-record-with-native-keyboard-input', passed: true });
+    }
+
+    async function waitForSourcePDF(fixture, expectedPage) {
+        await wait(() => {
+            const reader = Zotero.Reader.getByTabID(win.Zotero_Tabs.selectedID);
+            const viewer = reader?._internalReader?._primaryView?._iframeWindow?.PDFViewerApplication?.pdfViewer;
+            const pageIndex = viewer ? viewer.currentPageNumber - 1
+                : Zotero.Items.get(fixture.id).getAttachmentLastPageIndex();
+            return reader?.itemID === fixture.id && pageIndex === expectedPage;
+        }, 'native PDF reader reached the original attachment and page of ' + fixture.label);
+    }
+
+    async function revisitNativeReview(reader, surface) {
+        const heading = [...surface.querySelectorAll('h3')].find(node => node.textContent === 'Relevant Excerpts');
+        check(heading, 'Missing restored review excerpts heading');
+        let block = heading.nextElementSibling;
+        for (const [index, excerpt] of state.review.excerpts.entries()) {
+            const quote = block?.querySelector('.highlight');
+            check(quote?.textContent.includes(excerpt.quote), 'Missing quote in appended record');
+            // Place the caret inside the native highlight to reveal Zotero's
+            // own Go to Page popup, then use its source action.
+            surface.focus();
+            const selection = surface.ownerDocument.getSelection();
+            selection.collapse(quote.firstChild, 2);
+            const frame = surface.ownerDocument.defaultView;
+            const view = (frame.wrappedJSObject || frame)._currentEditorInstance?._editorCore?.view;
+            await wait(() => view?.state.selection.$from.parent.textContent === quote.textContent,
+                'native editor selection in the restored quote');
+            const popup = await wait(() => {
+                const button = surface.ownerDocument.querySelector('.highlight-popup button');
+                return button?.getClientRects().length && button;
+            }, 'native highlight Go to Page popup');
+            popup.click();
+            await waitForSourcePDF(state.pdfs[index], excerpt.pageIndex);
+            await selectReader(reader);
+            block = block.nextElementSibling;
+        }
+        checks.push({ check: 'restored-record-native-go-to-page-opens-both-sources', passed: true });
     }
 
     function nativeKey(targetWindow, key) {
@@ -693,10 +830,19 @@ export async function runSmoke(config) {
         const annotations = [...parsed.querySelectorAll('[data-annotation]')]
             .map(node => JSON.parse(decodeURIComponent(node.getAttribute('data-annotation'))));
         for (const fixture of evidence) {
-            check(text.split(fixture.quote).length === 2, `${fixture.label}: expected exactly one saved evidence quote`);
+            const count = state.review?.excerpts.some(excerpt => excerpt.quote === fixture.quote) ? 2 : 1;
+            check(text.split(fixture.quote).length === count + 1, `${fixture.label}: incorrect number of saved evidence quotes`);
             const matching = annotations.filter(value => value.attachmentURI === fixture.attachmentURI
-                && value.annotationKey === fixture.annotationKey && value.position?.pageIndex === 0);
-            check(matching.length === 1, `${fixture.label}: evidence is missing its original PDF annotation source`);
+                && value.annotationKey === fixture.annotationKey && value.position?.pageIndex === fixture.pageIndex);
+            check(matching.length === count, `${fixture.label}: evidence is missing its original PDF annotation source`);
+        }
+        if (state.review) {
+            check(text.includes(state.review.question) && text.includes(state.review.reason),
+                'The rereading question or revision reason was lost');
+            const selection = state.review.excerpts[1];
+            const withoutKeys = annotations.filter(value => value.attachmentURI === selection.attachmentURI
+                && !value.annotationKey && value.position?.pageIndex === selection.pageIndex);
+            check(withoutKeys.length === 2, 'The ordinary selection lost its original PDF position');
         }
     }
 

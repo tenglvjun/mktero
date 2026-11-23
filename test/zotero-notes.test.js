@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { DOMParser } from 'linkedom';
 import { createZoteroNotes } from '../src/platform/zotero-notes.js';
 
 function codeError(code) {
@@ -1976,4 +1977,28 @@ test('a hosted formula paste puts the caret after the pasted formula', async () 
         ['scroll'],
     ]]);
     handle.destroy();
+});
+
+test('rereading opens the original PDF position even for an unsaved highlight on another paper', async () => {
+    const position = { pageIndex: 3, rects: [[1, 2, 3, 4]] };
+    const attachmentURI = 'http://zotero.org/users/1/items/BOOK0002';
+    const data = encodeURIComponent(JSON.stringify({ attachmentURI, position, pageLabel: 'iv' }));
+    const note = standaloneNoteItem({ key: 'RESEARCH',
+        getNote: () => '<p><span class="highlight" data-annotation="' + data + '">Old selection</span></p>' });
+    const other = pdfAttachment({ id: 43, parentID: null, getField: () => 'Other PDF' });
+    const zotero = createFakeZotero([pdfAttachment(), other, parentItem(), note]);
+    zotero.URI = { getURIItem: async uri => uri === attachmentURI ? other : null };
+    let destination;
+    const notes = createZoteroNotes(zotero, {
+        parseHTML: html => new DOMParser().parseFromString(html, 'text/html'),
+        getMainWindow: () => ({ ZoteroPane: { viewPDF: (...args) => { destination = args; } } }),
+    });
+    await notes.pinResearchNote(42, note.id);
+    const { excerpts } = await notes.listResearchNoteExcerpts(42, note.id);
+    assert.equal(excerpts[0].title, 'Other PDF');
+    await notes.openResearchNoteExcerpt(42, note.id, excerpts[0].id);
+    assert.deepEqual(destination, [43, { position }]);
+    await notes.clearResearchNote(42);
+    await assert.rejects(notes.openResearchNoteExcerpt(42, note.id, excerpts[0].id),
+        codeError('MKTERO_NOTE_TARGET_CHANGED'));
 });

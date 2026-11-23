@@ -2821,6 +2821,12 @@ function createTabNotesBridge(getAttachmentID) {
             const id = getAttachmentID();
             return id ? notes.getResearchNote(id) : { status: 'unavailable' };
         },
+        listResearchNoteExcerpts: logged((noteID, options) => (
+            notes.listResearchNoteExcerpts(attachmentID(), noteID, options)
+        )),
+        openResearchNoteExcerpt: logged((noteID, excerptID, options) => (
+            notes.openResearchNoteExcerpt(attachmentID(), noteID, excerptID, options)
+        )),
         createResearchNote: logged((options = {}) => notes.createResearchNote(attachmentID(), options)),
         pinResearchNote: logged(noteID => notes.pinResearchNote(attachmentID(), noteID)),
         clearResearchNote: logged(() => notes.clearResearchNote(attachmentID())),

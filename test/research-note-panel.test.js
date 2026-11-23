@@ -436,3 +436,61 @@ test('missing and read-only research targets never become insertion destinations
     assert.deepEqual(f.mounted, []);
     f.panel.destroy();
 });
+
+test('rereading selects cross-paper excerpts and appends to the pinned native editor', async () => {
+    const { panel, aside, adapter, mounted } = fixture({ key: research.key });
+    const appends = [];
+    const opened = [];
+    adapter.listResearchNoteExcerpts = async () => ({ excerpts: [
+        { id: 'first', title: 'Paper A', text: 'First excerpt', available: true, source: { pageLabel: '2' } },
+        { id: 'second', title: 'Paper B', text: 'Second excerpt', available: true, source: { pageLabel: 'iv' } },
+    ] });
+    adapter.openResearchNoteExcerpt = async (noteID, id) => opened.push([noteID, id]);
+    const mount = adapter.mountEditor;
+    adapter.mountEditor = async (...args) => ({
+        ...await mount(...args),
+        appendResearchNoteReview: async ids => appends.push(ids),
+    });
+    await flush();
+    aside.querySelector('.mktero-research-note-reread').click();
+    await flush();
+
+    const review = aside.querySelector('.mktero-research-review');
+    const selected = [...review.querySelectorAll('input')];
+    selected[1].checked = true;
+    selected[1].dispatchEvent(new aside.ownerDocument.defaultView.Event('change'));
+    review.querySelector('.mktero-review-filter').click();
+    assert.deepEqual([...review.querySelectorAll('label')].map(label => label.textContent), ['Second excerpt']);
+    review.querySelector('.mktero-review-filter').click();
+    const first = review.querySelector('input');
+    first.checked = true;
+    first.dispatchEvent(new aside.ownerDocument.defaultView.Event('change'));
+    review.querySelectorAll('.mktero-review-source')[1].click();
+    await flush();
+    assert.deepEqual(opened, [[research.id, 'second']]);
+    const append = review.querySelector('.mktero-review-append');
+    append.click();
+    append.click();
+    await flush();
+    assert.deepEqual(mounted, [research.id]);
+    assert.deepEqual(appends, [['first', 'second']]);
+    assert.equal(review.hidden, true);
+    assert.equal(panel.handle.noteID, research.id);
+});
+
+test('a pending review read is discarded when the pinned note changes', async () => {
+    const { aside, adapter } = fixture({ key: research.key });
+    const pending = Promise.withResolvers();
+    adapter.listResearchNoteExcerpts = () => pending.promise;
+    await flush();
+    aside.querySelector('.mktero-research-note-reread').click();
+    await adapter.clearResearchNote();
+    await flush();
+    pending.resolve({ excerpts: [
+        { id: 'old', title: 'Old paper', text: 'Old excerpt', available: true,
+            source: { pageLabel: '1' } },
+    ] });
+    await flush();
+    assert.equal(aside.querySelector('.mktero-research-review').hidden, true);
+    assert.equal(aside.querySelector('.mktero-review-row'), null);
+});

@@ -1,5 +1,7 @@
 import {
     NOTE_EDITOR_UNAVAILABLE,
+    NOTE_REVIEW_UNCONFIRMED,
+    NOTE_TARGET_CHANGED,
 } from '../core/zotero-note-bridge.js';
 import { createLucideIcon, LUCIDE_ICONS } from '../icons/lucide-icon.js';
 import { createNativeContextMenu } from './native-context-menu.js';
@@ -72,6 +74,7 @@ class ZoteroNotesPanel {
         this.openingNote = false;
         this.researchActionPending = false;
         this.choosingResearchNote = false;
+        this.review = null;
         this.continuationHintVisible = false;
         // Bumped whenever the open editor is closed, so a mount that finishes
         // after the reader went back (or switched adapter) is discarded.
@@ -152,6 +155,7 @@ class ZoteroNotesPanel {
 
     chooseResearchNote() {
         if (!this.adapter?.pinResearchNote || this.openingNote || this.researchActionPending) return;
+        this.closeReview();
         this.closeEditor();
         this.choosingResearchNote = true;
         this.noteScope = 'standalone';
@@ -186,6 +190,7 @@ class ZoteroNotesPanel {
 
     async clearResearchNote() {
         if (!this.adapter?.clearResearchNote) return;
+        this.closeReview();
         await this.adapter.clearResearchNote();
         await this.refresh();
     }
@@ -203,6 +208,132 @@ class ZoteroNotesPanel {
         }
         if (this.handle?.noteID === expected && this.mode === 'editor') return;
         await this.openNote(expected);
+    }
+
+    isCurrentReview(review) {
+        return !this.destroyed && this.review === review && this.adapter === review.adapter
+            && this.state.researchNote?.note?.id === review.noteID;
+    }
+
+    closeReview({ focus = false } = {}) {
+        if (!this.review) return;
+        this.review = null;
+        this.render();
+        if (focus) this.elements.researchReread.focus();
+    }
+
+    async openReview() {
+        const target = this.state.researchNote;
+        const adapter = this.adapter;
+        if (!target?.note?.id || !adapter?.listResearchNoteExcerpts || this.review) return;
+        const review = {
+            adapter, noteID: target.note.id, excerpts: [], selected: new Set(),
+            visible: true, loading: true, writing: false, status: '',
+        };
+        this.review = review;
+        this.render();
+        this.elements.reviewBack.focus();
+        await this.loadReview(review);
+    }
+
+    async loadReview(review) {
+        const { adapter, noteID } = review;
+        const request = {};
+        review.load = request;
+        const isCurrent = () => this.isCurrentReview(review) && review.load === request;
+        try {
+            const result = await adapter.listResearchNoteExcerpts(noteID, {
+                editorHandle: this.handle,
+            });
+            if (!isCurrent()) return;
+            review.excerpts = result.excerpts;
+            const availableIDs = new Set(result.excerpts.filter(row => row.available).map(row => row.id));
+            for (const id of review.selected) {
+                if (!availableIDs.has(id)) review.selected.delete(id);
+            }
+            review.savedOnly = result.savedOnly;
+        }
+        catch {
+            if (isCurrent()) review.status = 'notes.reviewUnavailable';
+        }
+        finally {
+            if (isCurrent()) {
+                review.loading = false;
+                this.render();
+            }
+        }
+    }
+
+    async openReviewSource(review, id) {
+        if (!this.isCurrentReview(review)) return;
+        try {
+            await review.adapter.openResearchNoteExcerpt(review.noteID, id, {
+                editorHandle: this.handle,
+                ...this.hostContext(),
+                isCurrent: () => this.isCurrentReview(review),
+            });
+        }
+        catch {
+            if (!this.isCurrentReview(review)) return;
+            review.status = 'notes.reviewSourceUnavailable';
+            await this.loadReview(review);
+        }
+    }
+
+    async appendReview() {
+        const review = this.review;
+        if (!review || review.writing || !review.selected.size) return;
+        review.writing = true;
+        review.status = '';
+        const ensureCurrent = () => this.isCurrentReview(review);
+        this.render();
+        try {
+            if (this.handle?.noteID !== review.noteID || this.mode !== 'editor') {
+                await this.continueResearchNote();
+            }
+            if (!ensureCurrent()) return;
+            const handle = this.handle;
+            if (!handle?.appendResearchNoteReview || handle.noteID !== review.noteID || !handle.editable) {
+                review.status = 'notes.reviewWriteUnavailable';
+                return;
+            }
+            const token = this.editorToken;
+            const ids = review.excerpts.filter(row => review.selected.has(row.id)).map(row => row.id);
+            review.visible = false;
+            this.render();
+            await handle.appendResearchNoteReview(ids, {
+                title: this.t('notes.reviewTitle'),
+                question: this.t('notes.reviewQuestion'),
+                excerpts: this.t('notes.reviewExcerpts'),
+                judgment: this.t('notes.reviewJudgment'),
+            }, () => ensureCurrent() && this.handle === handle && this.editorToken === token);
+            if (ensureCurrent()) this.closeReview();
+        }
+        catch (error) {
+            if (!ensureCurrent()) return;
+            if (error?.code === NOTE_TARGET_CHANGED) {
+                review.visible = true;
+                review.status = 'notes.reviewExcerptsChanged';
+                await this.loadReview(review);
+            }
+            else if (error?.code === NOTE_REVIEW_UNCONFIRMED) {
+                this.closeReview();
+                this.elements.reviewEditorStatus.hidden = false;
+                this.elements.reviewEditorStatus.textContent = this.t('notes.reviewWriteUnavailable');
+            }
+            else {
+                review.status = 'notes.reviewWriteUnavailable';
+                review.visible = true;
+                review.selected.clear();
+                await this.loadReview(review);
+            }
+        }
+        finally {
+            if (ensureCurrent()) {
+                review.writing = false;
+                this.render();
+            }
+        }
     }
 
     // Capture one editor before PDF location starts. A user switching notes
@@ -247,6 +378,7 @@ class ZoteroNotesPanel {
         if (adapter === this.adapter) return;
         this.disposeObserver?.();
         this.disposeObserver = null;
+        this.review = null;
         this.closeEditor();
         this.choosingResearchNote = false;
         this.researchActionPending = false;
@@ -318,6 +450,7 @@ class ZoteroNotesPanel {
                 ? state.annotationCount
                 : 0,
         };
+        if (this.review && !this.isCurrentReview(this.review)) this.review = null;
         // A note deleted elsewhere cannot stay open. Only the handle can say
         // so: a list can lag behind a note's first save, can be cut at its
         // limit, or can have failed, and none of those means the note is gone.
@@ -458,6 +591,7 @@ class ZoteroNotesPanel {
         if (this.destroyed) return;
         this.disposeObserver?.();
         this.disposeObserver = null;
+        this.review = null;
         this.closeEditor();
         this.editorContainer?.remove();
         this.editorContainer = null;
@@ -617,6 +751,7 @@ class ZoteroNotesPanel {
         this.mode = 'list';
         this.continuationHintVisible = false;
         if (this.elements) {
+            this.elements.reviewEditorStatus.hidden = true;
             this.elements.continuationPrompts.removeAttribute('open');
             this.renderContinuationHint();
         }
@@ -663,12 +798,13 @@ class ZoteroNotesPanel {
     render() {
         if (this.destroyed) return;
         const { elements, state } = this;
+        const reviewing = this.review?.visible === true;
         const editing = this.mode === 'editor';
         const listed = state.status === 'ready' || state.status === 'no-parent';
         const scopeNotes = this.scopeNotes();
         const visibleNotes = this.filteredNotes();
-        elements.listView.hidden = editing;
-        elements.editorView.hidden = !editing;
+        elements.listView.hidden = editing || reviewing;
+        elements.editorView.hidden = !editing || reviewing;
         elements.count.hidden = editing || !listed || !scopeNotes.length;
         elements.count.textContent = visibleNotes.length === scopeNotes.length
             ? String(scopeNotes.length)
@@ -699,6 +835,7 @@ class ZoteroNotesPanel {
         });
         elements.editorTarget.title = elements.editorTarget.textContent;
         this.renderResearchNote();
+        this.renderReview();
         this.renderContinuationHint();
         this.renderStatus();
         this.renderList();
@@ -735,6 +872,11 @@ class ZoteroNotesPanel {
             title: target?.note?.title || this.t('notes.untitled'),
         }));
         researchContinue.disabled = !['ready', 'readonly'].includes(target?.status) || busy;
+        const reread = this.elements.researchReread;
+        reread.hidden = busy || !this.adapter?.listResearchNoteExcerpts
+            || !['ready', 'readonly'].includes(target?.status);
+        reread.disabled = Boolean(this.review);
+        reread.textContent = this.t('notes.reviewOpen');
         setLabel(researchClear, this.t('notes.clearResearchNote'));
         const statusKey = {
             readonly: 'notes.researchReadonly',
@@ -744,6 +886,78 @@ class ZoteroNotesPanel {
         researchStatus.hidden = !statusKey;
         researchStatus.textContent = statusKey ? this.t(statusKey) : '';
         setLabel(this.elements.pinButton, this.t('notes.pinResearchNote'));
+    }
+
+    renderReview() {
+        const review = this.review;
+        const { reviewView, reviewBack, reviewList, reviewStatus, reviewAppend, reviewFilter } = this.elements;
+        reviewView.hidden = !review?.visible;
+        if (!review && this.renderedReview) {
+            this.renderedReview = null;
+            reviewList.replaceChildren();
+        }
+        if (!review?.visible) return;
+        reviewBack.textContent = this.t('notes.reviewBack');
+        reviewBack.disabled = review.writing;
+        reviewAppend.textContent = this.t('notes.reviewAppend');
+        reviewFilter.textContent = this.t(review.showSelected ? 'notes.reviewShowAll' : 'notes.reviewShowSelected');
+        reviewFilter.disabled = !review.selected.size && !review.showSelected;
+        this.updateReviewAppend();
+        const message = review.status || (review.loading && 'notes.reviewLoading')
+            || (!review.excerpts.length && 'notes.reviewEmpty')
+            || (review.savedOnly && 'notes.reviewSavedOnly')
+            || (this.state.researchNote.status === 'readonly' && 'notes.researchReadonly');
+        reviewStatus.hidden = !message;
+        reviewStatus.textContent = message ? this.t(message) : '';
+        const readonly = this.state.researchNote.status === 'readonly';
+        const previous = this.renderedReview;
+        if (previous?.excerpts === review.excerpts && previous.readonly === readonly
+            && previous.showSelected === review.showSelected) return;
+        this.renderedReview = { excerpts: review.excerpts, readonly, showSelected: review.showSelected };
+        const shown = review.showSelected
+            ? review.excerpts.filter(row => review.selected.has(row.id))
+            : review.excerpts;
+        const rows = shown.map(row => {
+            const item = this.element('li', 'mktero-review-row');
+            const label = this.element('label', 'mktero-review-excerpt');
+            const select = this.element('input');
+            select.type = 'checkbox';
+            select.disabled = !row.available || readonly;
+            select.checked = review.selected.has(row.id);
+            select.addEventListener('change', () => {
+                if (!this.isCurrentReview(review) || review.writing) {
+                    select.checked = review.selected.has(row.id);
+                    return;
+                }
+                if (select.checked) review.selected.add(row.id);
+                else review.selected.delete(row.id);
+                if (review.showSelected) this.renderedReview = null;
+                this.renderReview();
+                if (review.showSelected) reviewFilter.focus();
+            });
+            const excerpt = this.element('span');
+            excerpt.textContent = row.text;
+            label.append(select, excerpt);
+            const source = this.element('button', 'mktero-review-source mktero-research-note-text-action');
+            source.type = 'button';
+            source.disabled = !row.available;
+            const sourceLabel = this.t('notes.reviewSource', {
+                title: row.title || this.t('notes.untitled'),
+                page: row.source.pageLabel || String(row.source.position.pageIndex + 1),
+            });
+            source.textContent = row.available ? sourceLabel
+                : `${sourceLabel} · ${this.t('notes.reviewSourceUnavailable')}`;
+            source.addEventListener('click', () => void this.openReviewSource(review, row.id));
+            item.append(label, source);
+            return item;
+        });
+        reviewList.replaceChildren(...rows);
+    }
+
+    updateReviewAppend() {
+        const review = this.review;
+        this.elements.reviewAppend.disabled = !review?.selected.size || review.loading || review.writing
+            || this.state.researchNote?.status !== 'ready';
     }
 
     renderContinuationHint() {
@@ -887,7 +1101,10 @@ class ZoteroNotesPanel {
         const researchChange = this.element('button', 'mktero-research-note-text-action');
         researchChange.type = 'button';
         researchChange.addEventListener('click', () => this.chooseResearchNote());
-        researchStrip.appendChild(researchChange);
+        const researchReread = this.element('button', 'mktero-research-note-reread mktero-research-note-text-action');
+        researchReread.type = 'button';
+        researchReread.addEventListener('click', () => void this.openReview());
+        researchStrip.append(researchChange, researchReread);
         const researchSetup = this.element('div', 'mktero-research-note-setup');
         const researchSetupText = this.element('p', 'mktero-research-note-help');
         const researchActions = this.element('div', 'mktero-research-note-actions');
@@ -902,6 +1119,7 @@ class ZoteroNotesPanel {
         researchActions.append(researchCreate, researchChoose);
         researchSetup.append(researchSetupText, researchActions);
         researchContinue.addEventListener('click', () => {
+            this.closeReview();
             void this.runAction(() => this.continueResearchNote());
         });
         researchClear.addEventListener('click', () => {
@@ -1025,10 +1243,35 @@ class ZoteroNotesPanel {
             this.handle?.focus?.();
         });
         continuationHint.append(continuationBody, continuationDismiss);
-        editorView.append(editorBar, continuationHint, slot);
+        const reviewEditorStatus = this.element('p', 'mktero-research-note-status');
+        reviewEditorStatus.setAttribute('role', 'status');
+        reviewEditorStatus.hidden = true;
+        editorView.append(editorBar, reviewEditorStatus, continuationHint, slot);
         editorView.hidden = true;
 
-        this.aside.replaceChildren(researchStrip, researchSetup, listView, editorView);
+        const reviewView = this.element('div', 'mktero-research-review');
+        const reviewBack = this.element('button', 'mktero-research-note-text-action mktero-review-back');
+        reviewBack.type = 'button';
+        reviewBack.addEventListener('click', () => this.closeReview({ focus: true }));
+        const reviewList = this.element('ul', 'mktero-review-excerpts');
+        const reviewFilter = this.element('button', 'mktero-research-note-text-action mktero-review-filter');
+        reviewFilter.type = 'button';
+        reviewFilter.addEventListener('click', () => {
+            if (!this.review) return;
+            this.review.showSelected = !this.review.showSelected;
+            this.renderReview();
+        });
+        const reviewControls = this.element('div', 'mktero-research-note-actions');
+        reviewControls.append(reviewBack, reviewFilter);
+        const reviewStatus = this.element('p', 'mktero-research-note-status');
+        reviewStatus.setAttribute('role', 'status');
+        const reviewAppend = this.element('button', 'mktero-research-note-action mktero-review-append');
+        reviewAppend.type = 'button';
+        reviewAppend.addEventListener('click', () => void this.appendReview());
+        reviewView.append(reviewControls, reviewStatus, reviewList, reviewAppend);
+        reviewView.hidden = true;
+
+        this.aside.replaceChildren(researchStrip, researchSetup, listView, reviewView, editorView);
         newButton.addEventListener('click', () => {
             if (this.openCreateMenu({ anchor: newButton })) return;
             void this.createNote('item');
@@ -1044,6 +1287,8 @@ class ZoteroNotesPanel {
             researchStrip, researchLabel, researchTitle, researchContinue,
             researchClear, researchStatus, researchSetup, researchSetupText,
             researchCreate, researchChoose, researchChange,
+            researchReread, reviewView, reviewBack, reviewList, reviewStatus, reviewAppend,
+            reviewEditorStatus, reviewFilter,
             researchPicker, researchPickerText, researchPickerCancel,
             continuationHint, continuationText, continuationDismiss,
             continuationPrompts, continuationSummary, continuationQuestions, pinButton, editorTarget,
