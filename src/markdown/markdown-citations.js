@@ -1,3 +1,4 @@
+import { parser as markdownParser } from '@lezer/markdown';
 import {
     isLikelyNumericSuperscriptExponent,
     isNumericCitationContent,
@@ -12,6 +13,8 @@ const PUBLISHER_CHROME_HEADING_PATTERN = /^(?:check[ \t]+for[ \t]+updates|open[ 
 const MAX_PUBLISHER_CHROME_WORDS = 4;
 const MARKDOWN_HEADING_PATTERN = /^(#{1,6})[ \t]+.+$/gm;
 const NUMBERED_REFERENCE_PATTERN = /^[ \t]*(?:[-*+][ \t]+)?(?:\[(\d{1,4})\]|(\d{1,4})[.)])[ \t]+/gm;
+const APPENDIX_HEADING_PATTERN = /^(?:appendix\b|appendices\b|supplement(?:ary|al)?(?:[ \t]+(?:information|materials?|methods|results|data)\b|[ \t]*[:：]?$)|附录|附錄|补充(?:信息|材料|方法|结果|数据)|補充(?:資訊|材料|方法|結果|資料))/iu;
+const REFERENCE_PUBLISHER_NOTICE_PATTERN = /\r?\n[ \t]*\r?\n[ \t]*(?:\*{1,2}|_{1,2})?(?:publisher['’]s note\b|open access[ \t]+this (?:article|paper) is licensed\b)/iu;
 const MIN_NUMERIC_CITATION_STYLE_CONTAINERS = 2;
 const MIN_INFERRED_NUMBERED_REFERENCES = 3;
 const MIN_BARE_NUMBERED_REFERENCE_GAP_BUDGET = 2;
@@ -77,37 +80,63 @@ function isEscapedAuthorNoteCommand(source, index) {
 
 export function analyzeMarkdownCitations(markdown) {
     const source = String(markdown || '');
-    const section = findReferenceSection(source);
-    const references = section ? parseReferences(source, section) : [];
-    const bodyEnd = section?.from ?? source.length;
-    const frontMatter = analyzeFrontMatter(source, bodyEnd);
-    const citationBodyEnd = findAuthorAffiliationsStart(
-        source,
-        frontMatter.bodyFrom,
-        bodyEnd
-    ) ?? bodyEnd;
-    const citations = [
-        ...frontMatter.citations,
-        ...findNumericCitations(
-            source,
-            frontMatter.bodyFrom,
-            citationBodyEnd,
-            references
-        ),
-        ...findAuthorYearCitations(
-            source,
-            frontMatter.bodyFrom,
-            citationBodyEnd,
-            references
-        ),
-    ].sort((left, right) => left.from - right.from || left.to - right.to);
+    const searchable = maskNonProseBlocks(source);
+    const bibliographies = findBibliographies(searchable);
+    const frontMatterEnd = bibliographies[0]?.sections[0].headingFrom ?? source.length;
+    const frontMatter = analyzeFrontMatter(source, frontMatterEnd);
+    const citations = [...frontMatter.citations];
+    for (const { sections, references, scopeFrom } of bibliographies) {
+        const bodyFrom = Math.max(scopeFrom, frontMatter.bodyFrom);
+        const bodyRanges = [];
+        let from = bodyFrom;
+        for (const section of sections) {
+            if (from < section.headingFrom) {
+                const to = findAuthorAffiliationsStart(
+                    searchable, from, section.headingFrom
+                ) ?? section.headingFrom;
+                if (from < to) bodyRanges.push({ from, to });
+            }
+            from = Math.max(from, section.to);
+        }
+        for (const citation of findNumericCitations(searchable, bodyRanges, references)) {
+            citations.push(citation);
+        }
+        const referencesByYear = groupReferencesByYear(references);
+        for (const range of bodyRanges) {
+            for (const citation of findAuthorYearCitations(
+                searchable, range.from, range.to, referencesByYear
+            )) {
+                citations.push(citation);
+            }
+        }
+    }
+    citations.sort((left, right) => left.from - right.from || left.to - right.to);
 
     return {
-        references,
+        references: bibliographies.flatMap(bibliography => bibliography.references),
         affiliations: frontMatter.affiliations,
         affiliationMarkers: frontMatter.affiliationMarkers,
         citations: removeOverlappingCitations(citations),
     };
+}
+
+function maskNonProseBlocks(source) {
+    if (!source.includes('```') && !source.includes('~~~') && !source.includes('<!--')) {
+        return source;
+    }
+    const parts = [];
+    let from = 0;
+    const tree = markdownParser.parse(source);
+    for (let block = tree.topNode.firstChild; block; block = block.nextSibling) {
+        if (block.name !== 'FencedCode' && block.name !== 'CommentBlock') continue;
+        parts.push(source.slice(from, block.from));
+        // Keep offsets and line boundaries for citation and reference targets.
+        parts.push(source.slice(block.from, block.to).replace(/[^\r\n]/g, ' '));
+        from = block.to;
+    }
+    if (!parts.length) return source;
+    parts.push(source.slice(from));
+    return parts.join('');
 }
 
 function findAuthorAffiliationsStart(markdown, from, to) {
@@ -505,24 +534,111 @@ function affiliationMarkerKey(value) {
     return null;
 }
 
-function findReferenceSection(markdown) {
-    const headingPattern = new RegExp(REFERENCE_HEADING_LINE_PATTERN);
-    const match = [...markdown.matchAll(headingPattern)].at(-1);
-    if (!match) return inferNumberedReferenceSection(markdown);
+function findBibliographies(markdown) {
+    const headings = [...markdown.matchAll(REFERENCE_HEADING_LINE_PATTERN)];
+    const bibliographies = [];
+    let previousSection = null;
+    let lastSectionEnd = 0;
+    for (const [index, heading] of headings.entries()) {
+        const section = referenceSectionAt(
+            markdown, heading, headings[index + 1]?.index ?? markdown.length
+        );
+        lastSectionEnd = section.to;
+        const references = parseReferences(markdown, section, {
+            allowBareContinuation: bibliographies.length > 0,
+        });
+        if (!references.length) continue;
 
+        const current = bibliographies.at(-1);
+        if (!current) {
+            bibliographies.push(createBibliography(section, references, 0));
+            previousSection = section;
+            continue;
+        }
+
+        const scopeFrom = findAppendixStart(markdown, previousSection.to, section);
+        // An unrelated bibliography ends the range in which a continuation
+        // can be attributed to the current bibliography.
+        if (previousSection === current.sections.at(-1)
+            && (scopeFrom === null || current.scopeFrom === 0)
+            && continuesReferenceNumbers(current.lastNumber, references)) {
+            addReferenceSection(current, section, references);
+        } else if (scopeFrom !== null) {
+            bibliographies.push(createBibliography(section, references, scopeFrom));
+        }
+        previousSection = section;
+    }
+    if (bibliographies.length) return bibliographies;
+
+    const inferred = inferNumberedReferenceSection(markdown);
+    if (!inferred || inferred.from < lastSectionEnd) return [];
+    return [createBibliography(
+        { ...inferred, headingFrom: inferred.from },
+        parseReferences(markdown, inferred),
+        0
+    )];
+}
+
+function createBibliography(section, references, scopeFrom) {
+    const bibliography = { sections: [], references: [], scopeFrom, lastNumber: 0 };
+    addReferenceSection(bibliography, section, references);
+    return bibliography;
+}
+
+function addReferenceSection(bibliography, section, references) {
+    bibliography.sections.push(section);
+    for (const reference of references) {
+        bibliography.references.push(bibliography.scopeFrom
+            ? { ...reference, id: 'section:' + bibliography.scopeFrom + ':' + reference.id }
+            : reference);
+        bibliography.lastNumber = Math.max(bibliography.lastNumber, reference.number ?? 0);
+    }
+}
+
+function continuesReferenceNumbers(previousNumber, references) {
+    const first = references[0].number;
+    const last = references.at(-1).number;
+    if (!previousNumber || !Number.isInteger(first) || first <= previousNumber) {
+        return false;
+    }
+    const missing = last - previousNumber - references.length;
+    return missing <= bareNumberedReferenceGapBudget(last)
+        && references.every((reference, index) => (
+            reference.number > (references[index - 1]?.number ?? previousNumber)
+        ));
+}
+
+function findAppendixStart(markdown, from, section) {
+    const preceding = [...markdown.slice(from, section.headingFrom)
+        .matchAll(MARKDOWN_HEADING_PATTERN)];
+    let level = section.level + 1;
+    for (let index = preceding.length - 1; index >= 0; index--) {
+        const heading = preceding[index];
+        if (heading[1].length >= level) continue;
+        level = heading[1].length;
+        if (APPENDIX_HEADING_PATTERN.test(heading[0].slice(level).trim())) {
+            return from + heading.index;
+        }
+    }
+    return null;
+}
+
+function referenceSectionAt(markdown, match, nextReferenceHeading) {
     const level = match[1]?.length || 6;
     let from = match.index + match[0].length;
     if (markdown[from] === '\r') from++;
     if (markdown[from] === '\n') from++;
-    let to = markdown.length;
+    let to = nextReferenceHeading;
     const followingHeadings = new RegExp(MARKDOWN_HEADING_PATTERN);
     followingHeadings.lastIndex = from;
     for (let heading = followingHeadings.exec(markdown); heading; heading = followingHeadings.exec(markdown)) {
+        if (heading.index >= to) break;
         if (heading[1].length <= level) {
             if (unnumberedReferencesResumeAfterHeading(
                 markdown,
                 heading,
-                level
+                level,
+                to
             )) {
                 continue;
             }
@@ -530,24 +646,18 @@ function findReferenceSection(markdown) {
             break;
         }
     }
-    const explicitSection = { from, to };
-    const inferredSection = inferNumberedReferenceSection(markdown);
-    if (inferredSection
-        && inferredSection.from >= explicitSection.to
-        && !parseReferences(markdown, explicitSection).length) {
-        return inferredSection;
-    }
-    return explicitSection;
+    return { from, to, headingFrom: match.index, level };
 }
 
-function unnumberedReferencesResumeAfterHeading(markdown, heading, level) {
+function unnumberedReferencesResumeAfterHeading(markdown, heading, level, sectionEnd) {
     let from = heading.index + heading[0].length;
     if (markdown[from] === '\r') from++;
     if (markdown[from] === '\n') from++;
-    let to = markdown.length;
+    let to = sectionEnd;
     const followingHeadings = new RegExp(MARKDOWN_HEADING_PATTERN);
     followingHeadings.lastIndex = from;
     for (let next = followingHeadings.exec(markdown); next; next = followingHeadings.exec(markdown)) {
+        if (next.index >= to) break;
         if (next[1].length <= level) {
             to = next.index;
             break;
@@ -620,7 +730,11 @@ function hasNumberedCitationBefore(markdown, to, maximumNumber) {
     return false;
 }
 
-function parseReferences(markdown, section) {
+function parseReferences(markdown, section, { allowBareContinuation = false } = {}) {
+    const notice = REFERENCE_PUBLISHER_NOTICE_PATTERN.exec(
+        markdown.slice(section.from, section.to)
+    );
+    if (notice) section = { ...section, to: section.from + notice.index };
     const source = markdown.slice(section.from, section.to);
     const markerPattern = new RegExp(NUMBERED_REFERENCE_PATTERN);
     const markers = [...source.matchAll(markerPattern)];
@@ -646,7 +760,8 @@ function parseReferences(markdown, section) {
 
     const bareNumberedReferences = parseBareNumberedReferences(
         markdown,
-        section
+        section,
+        allowBareContinuation
     );
     if (bareNumberedReferences.length) return bareNumberedReferences;
 
@@ -662,7 +777,7 @@ function parseReferences(markdown, section) {
         .filter(reference => reference.text && reference.year);
 }
 
-function parseBareNumberedReferences(markdown, section) {
+function parseBareNumberedReferences(markdown, section, allowContinuation) {
     const entries = paragraphRanges(markdown, section).map(range => {
         const source = markdown.slice(range.from, range.to);
         const marker = /^(\d{1,4})[ \t]+/.exec(source);
@@ -675,6 +790,7 @@ function parseBareNumberedReferences(markdown, section) {
         };
     });
     if (!entries.length || entries.some(entry => !entry)) return [];
+    if (!allowContinuation && entries[0].number !== 1) return [];
     if (!bareNumberedEntriesAreContiguousEnough(entries)) return [];
 
     return entries.map(entry => createReference({
@@ -693,7 +809,6 @@ function parseBareNumberedReferences(markdown, section) {
 // A dropped OCR entry leaves a hole in an otherwise numbered list. A small
 // hole still identifies the list; a jump or a restart does not.
 function bareNumberedEntriesAreContiguousEnough(entries) {
-    if (entries[0].number !== 1) return false;
     let previousNumber = 0;
     for (const entry of entries) {
         if (entry.number < previousNumber) return false;
@@ -701,7 +816,7 @@ function bareNumberedEntriesAreContiguousEnough(entries) {
     }
     const lastNumber = entries.at(-1).number;
     const present = new Set(entries.map(entry => entry.number)).size;
-    const missing = lastNumber - present;
+    const missing = lastNumber - entries[0].number + 1 - present;
     return missing <= bareNumberedReferenceGapBudget(lastNumber);
 }
 
@@ -767,7 +882,7 @@ function createReference({ id, number, text, source, from, to }) {
     };
 }
 
-function findNumericCitations(markdown, bodyFrom, bodyEnd, references) {
+function findNumericCitations(markdown, bodyRanges, references) {
     const byNumber = new Map(
         references
             .filter(reference => Number.isInteger(reference.number))
@@ -775,10 +890,43 @@ function findNumericCitations(markdown, bodyFrom, bodyEnd, references) {
     );
     if (!byNumber.size) return [];
 
-    const squareBracketCitations = [];
-    const parentheticalCitations = [];
-    let bracketCitationContainers = 0;
-    let parentheticalCitationContainers = 0;
+    const styles = {
+        bracket: { citations: [], count: 0 },
+        parenthetical: { citations: [], count: 0 },
+        superscript: { citations: [], count: 0 },
+        bracketedSuperscript: { citations: [], count: 0 },
+    };
+    for (const { from, to } of bodyRanges) {
+        for (const { style, citations } of numericCitationContainers(
+            markdown, from, to, byNumber
+        )) {
+            styles[style].citations.push(...citations);
+            styles[style].count++;
+        }
+    }
+    const { bracket, parenthetical, superscript, bracketedSuperscript } = styles;
+    // Brackets wrapped in superscript math count as superscript citations.
+    // Bare numeric footnotes stay non-interactive when bracket citations win.
+    if (hasBracketCitationStyle(bracket.count)) {
+        return [...bracket.citations, ...bracketedSuperscript.citations];
+    }
+    const superscriptCount = bracketedSuperscript.count + superscript.count;
+    if (hasParentheticalCitationStyle(parenthetical.count)
+        && parenthetical.count >= superscriptCount) {
+        return [...bracket.citations, ...parenthetical.citations];
+    }
+    if (hasSuperscriptCitationStyle(superscriptCount)) {
+        return [...bracket.citations, ...bracketedSuperscript.citations, ...superscript.citations];
+    }
+    return [
+        ...bracket.citations,
+        ...parenthetical.citations,
+        ...bracketedSuperscript.citations,
+        ...superscript.citations,
+    ];
+}
+
+function* numericCitationContainers(markdown, bodyFrom, bodyEnd, byNumber) {
     const body = markdown.slice(bodyFrom, bodyEnd);
     const numericEnumerationStarts = findNumericEnumerationStarts(body);
     const containers = [
@@ -802,24 +950,16 @@ function findNumericCitations(markdown, bodyFrom, bodyEnd, references) {
                     || parentheticalRangeLooksStatistical(body, match))) {
                 continue;
             }
-            const matched = numericCitationsInContainer(
+            const citations = numericCitationsInContainer(
                 match,
                 bodyFrom,
                 byNumber
             );
-            if (squareBrackets) {
-                squareBracketCitations.push(...matched);
-                if (matched.length) bracketCitationContainers++;
-            } else {
-                parentheticalCitations.push(...matched);
-                if (matched.length) parentheticalCitationContainers++;
+            if (citations.length) {
+                yield { style: squareBrackets ? 'bracket' : 'parenthetical', citations };
             }
         }
     }
-    const bareSuperscriptCitations = [];
-    const bracketedSuperscriptCitations = [];
-    let bareSuperscriptContainers = 0;
-    let bracketedSuperscriptContainers = 0;
     for (const marker of findSuperscriptMarkers(
         markdown,
         bodyFrom,
@@ -828,48 +968,16 @@ function findNumericCitations(markdown, bodyFrom, bodyEnd, references) {
     )) {
         const source = superscriptCitationSource(marker);
         if (!source) continue;
-        const matched = numericCitationsInText(
+        const citations = numericCitationsInText(
             source.value,
             source.from,
             byNumber,
             marker.markup
         );
-        if (!matched.length) continue;
-        if (source.bracketed) {
-            bracketedSuperscriptCitations.push(...matched);
-            bracketedSuperscriptContainers++;
-        }
-        else {
-            bareSuperscriptCitations.push(...matched);
-            bareSuperscriptContainers++;
+        if (citations.length) {
+            yield { style: source.bracketed ? 'bracketedSuperscript' : 'superscript', citations };
         }
     }
-    // $^{[1-4]}$ is the citation, not a bracket-style marker wrapped in math.
-    // Bare $^{1}$ footnotes stay non-interactive once real [n] citations win.
-    if (hasBracketCitationStyle(bracketCitationContainers)) {
-        return [
-            ...squareBracketCitations,
-            ...bracketedSuperscriptCitations,
-        ];
-    }
-    const superscriptCitations = [
-        ...bracketedSuperscriptCitations,
-        ...bareSuperscriptCitations,
-    ];
-    const superscriptCitationContainers = bracketedSuperscriptContainers
-        + bareSuperscriptContainers;
-    if (hasParentheticalCitationStyle(parentheticalCitationContainers)
-        && parentheticalCitationContainers >= superscriptCitationContainers) {
-        return [...squareBracketCitations, ...parentheticalCitations];
-    }
-    if (hasSuperscriptCitationStyle(superscriptCitationContainers)) {
-        return [...squareBracketCitations, ...superscriptCitations];
-    }
-    return [
-        ...squareBracketCitations,
-        ...parentheticalCitations,
-        ...superscriptCitations,
-    ];
 }
 
 function hasBracketCitationStyle(containerCount) {
@@ -1175,10 +1283,9 @@ function affiliationCitationMarker(label) {
     };
 }
 
-function findAuthorYearCitations(markdown, bodyFrom, bodyEnd, references) {
+function findAuthorYearCitations(markdown, bodyFrom, bodyEnd, referencesByYear) {
     const body = markdown.slice(bodyFrom, bodyEnd);
     const citations = [];
-    const referencesByYear = groupReferencesByYear(references);
     const parentheticalContainers = [
         {
             pattern: /[（(]((?:[^()（）\r\n]|\r?\n(?!\r?\n)){1,240})[)）]/g,

@@ -2295,6 +2295,103 @@ test('keeps hyphenated initials within initials-first author fields', () => {
     assert.equal(result.citations[0].references[0], result.references[0]);
 });
 
+test('links superscripts across split bibliographies and intervening methods', () => {
+    const markdown = [
+        '# Paper',
+        '## Introduction',
+        'Prior work $^{1,3–5}$ supports the result. Area is measured in m$^{2}$.',
+        '## References',
+        '1. Alpha A. First paper. (2020).',
+        '2. Beta B. Second paper. (2021).',
+        '3. Gamma G. Third paper. (2022). See also $^{1}$.',
+        "Publisher's note. This notice is outside the bibliography.",
+        '## Methods',
+        'The protocol $^{2}$ extends a previous study $^{5}$.',
+        '## 参考文献',
+        '5 Epsilon E. Fifth paper. (2024).',
+        '## Acknowledgements',
+        'A numeric marker $^{1}$ follows the bibliography.',
+    ].join('\n\n');
+
+    const { references, citations } = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(references.map(reference => reference.number), [1, 2, 3, 5]);
+    assert.equal(references[2].text, 'Gamma G. Third paper. (2022). See also $^{1}$.');
+    assert.deepEqual(citations.map(citation => [
+        markdown.slice(citation.from, citation.to),
+        citation.referenceIds,
+    ]), [
+        ['1', ['number:1']],
+        ['3–5', ['number:3', 'number:5']],
+        ['2', ['number:2']],
+        ['5', ['number:5']],
+    ]);
+    assert.equal(
+        citations[2].superscriptMarkup.wrapperFrom,
+        markdown.indexOf('$^{2}$', markdown.indexOf('## Methods'))
+    );
+});
+
+test('scopes restarted bibliography numbers to an explicitly labeled appendix', () => {
+    const markdown = [
+        '# Paper',
+        '## Introduction',
+        'The body cites [1] and [2].',
+        '## References',
+        '[1] Alpha A. Main paper. 2020.',
+        '[2] Beta B. Main follow-up. 2021.',
+        '## Appendix A',
+        'The appendix cites [1] and has no entry for [2].',
+        '### References',
+        '[1] Gamma G. Appendix paper. 2022.',
+        '## Additional material',
+        'This ambiguous section uses [1].',
+        '## References',
+        '[1] Delta D. Unscoped restart. 2023.',
+    ].join('\n\n');
+
+    const { references, citations } = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(references.map(reference => reference.text), [
+        'Alpha A. Main paper. 2020.',
+        'Beta B. Main follow-up. 2021.',
+        'Gamma G. Appendix paper. 2022.',
+    ]);
+    assert.equal(new Set(references.map(reference => reference.id)).size, 3);
+    assert.deepEqual(citations.map(citation => citation.references[0]), references);
+    assert.ok(citations[2].from > markdown.indexOf('## Appendix A'));
+});
+
+test('ignores bibliography headings and numbering inside fenced examples', () => {
+    const markdown = [
+        '# Paper',
+        '## Introduction',
+        'The study cites [1] and [2].',
+        '## References',
+        '[1] Alpha A. First paper. 2020.',
+        '## Methods',
+        '~~~md',
+        '## References',
+        '[2] Example only. 2021.',
+        '~~~',
+        'Methods cite [2].',
+        '## References',
+        '[2] Beta B. Second paper. 2022.',
+    ].join('\n\n');
+
+    const { references, citations } = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(references.map(reference => reference.text), [
+        'Alpha A. First paper. 2020.',
+        'Beta B. Second paper. 2022.',
+    ]);
+    assert.deepEqual(citations.map(citation => citation.referenceIds), [
+        ['number:1'],
+        ['number:2'],
+        ['number:2'],
+    ]);
+});
+
 test('supports Chinese reference headings and numbered list entries', () => {
     const markdown = [
         '# 论文',
