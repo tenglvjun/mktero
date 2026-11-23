@@ -1322,9 +1322,9 @@ export function createInlineMarkdownEditor({
             const ranges = translatedSelectionRanges(view, range).flatMap(part => (
                 subtractChromeRanges(part, currentChromeRanges)
             ));
-            const blocks = [];
             const hits = [];
             const unaligned = [];
+            let hasUnmapped = false;
             const translatedRanges = [];
             for (const pair of currentTranslationPairs) {
                 if (pair.sourceFallback) continue;
@@ -1337,8 +1337,10 @@ export function createInlineMarkdownEditor({
                 });
                 if (!selected.length) continue;
                 translatedRanges.push(...selected);
-                blocks.push(pair);
-                if (pair.sourceFrom == null) continue;
+                if (pair.sourceFrom == null) {
+                    hasUnmapped = true;
+                    continue;
+                }
                 // Only the projected alignment units identify a precise source passage.
                 if (!pair.units.length) {
                     unaligned.push(pair);
@@ -1358,8 +1360,11 @@ export function createInlineMarkdownEditor({
                         });
                     });
                 }
+                if (!seen.size && visibleMarkdownTextForRanges(
+                    currentTranslationMarkdown, selected
+                ).trim()) unaligned.push(pair);
             }
-            if (!blocks.length) return null;
+            if (!translatedRanges.length) return null;
             return {
                 key: ranges.map(range => `${range.from}:${range.to}`).join(','),
                 ranges,
@@ -1368,7 +1373,7 @@ export function createInlineMarkdownEditor({
                     translationSelectionPoint(view, range.endContainer, range.endOffset),
                 ],
                 translatedText: visibleMarkdownTextForRanges(currentTranslationMarkdown, translatedRanges),
-                blocks, hits, unaligned,
+                hits, unaligned, hasUnmapped,
             };
         }
         catch {
@@ -1531,6 +1536,7 @@ export function createInlineMarkdownEditor({
                 wholeSelection: true,
             }),
             shown: new Set(),
+            included: new Set(),
         };
         activeTranslationSelection = active;
         updateTranslationSelection(active);
@@ -1543,8 +1549,8 @@ export function createInlineMarkdownEditor({
             `${excerpt.sourceFrom}:${excerpt.sourceTo}`, excerpt,
         ]));
         active.excerpts = [...unique.values()].sort((left, right) => left.sourceFrom - right.sourceFrom);
-        const included = new Set(excerpts.map(excerpt => excerpt.id));
-        active.source = resolveSourceBlocks(active.blocks.filter(pair => included.has(pair.id)),
+        const includedBlocks = active.unaligned.filter(pair => active.included.has(pair.id));
+        active.source = resolveTranslationAnnotation(active.hits, includedBlocks,
             active.excerpts);
         if (active.view === 'compare') {
             view.dispatch({ effects: setTranslationSelection.of(active.excerpts.map(excerpt => ({
@@ -1573,11 +1579,18 @@ export function createInlineMarkdownEditor({
         const isCurrent = () => !destroyed && translationPopupEpoch === epoch
             && activeTranslationSelection === active && view.state.doc === active.doc;
         const { anchor, source: resolved } = active;
-        const wholeBlockActions = active.unaligned.filter(pair => !active.shown.has(pair.id)).map(pair => ({
+        const wholeBlockActions = active.unaligned.map(pair => ({
             id: pair.id,
+            shown: active.shown.has(pair.id),
+            included: active.included.has(pair.id),
             onShowBlock: () => {
                 if (!isCurrent()) return;
                 active.shown.add(pair.id);
+                updateTranslationSelection(active);
+            },
+            onToggleInclude: () => {
+                if (!isCurrent()) return;
+                if (!active.included.delete(pair.id)) active.included.add(pair.id);
                 updateTranslationSelection(active);
             },
         }));
@@ -1594,6 +1607,8 @@ export function createInlineMarkdownEditor({
             annotationUnavailable: resolved.annotationUnavailable,
             selectionContext: resolved.selectionContext,
             blockCount: resolved.blockCount,
+            saveScope: resolved.saveScope,
+            sourceUnavailable: active.hasUnmapped ? t('ai.translationSourceUnmapped') : '',
             wholeBlockActions,
             isCurrent,
             locateSource: source && (active.view === 'compare'
@@ -1616,30 +1631,44 @@ export function createInlineMarkdownEditor({
     const sourceExcerptText = (id, from, to) => String(hostTranslateOriginalBlockText
         ? hostTranslateOriginalBlockText(id, { from, to }) || ''
         : currentTranslationSourceMarkdown.slice(from, to)).trim();
-    const resolveSourceBlocks = (blocks, excerpts) => {
-        const ranges = [...new Map(blocks.map(pair => [
-            `${pair.sourceFrom}:${pair.sourceTo}`, { id: pair.id, from: pair.sourceFrom, to: pair.sourceTo },
-        ])).values()];
-        const display = excerpts.map(({ id, sourceFrom, sourceTo }) => sourceExcerptText(id, sourceFrom, sourceTo));
-        const overCap = ranges.length > MAX_TRANSLATED_SELECTION_BLOCKS;
-        const annotationText = overCap ? [] : ranges.map(({ id, from, to }) => {
-            const index = excerpts.findIndex(excerpt => excerpt.id === id
-                && excerpt.sourceFrom === from && excerpt.sourceTo === to);
-            return index >= 0 ? display[index] : sourceExcerptText(id, from, to);
-        });
+    const resolveTranslationAnnotation = (hits, includedBlocks, excerpts) => {
+        const selected = [...hits, ...includedBlocks.map(wholeSourceExcerpt)];
+        const ordered = selected.sort((left, right) => (
+            left.sourceFrom - right.sourceFrom || left.sourceTo - right.sourceTo
+        ));
+        const ranges = [];
+        for (const { sourceFrom: from, sourceTo: to } of ordered) {
+            const last = ranges.at(-1);
+            if (last && from <= last.to) last.to = Math.max(last.to, to);
+            else ranges.push({ from, to });
+        }
+        const blockCount = new Set(selected.map(excerpt => excerpt.id)).size;
+        const overCap = blockCount > MAX_TRANSLATED_SELECTION_BLOCKS;
+        const text = overCap ? '' : visibleMarkdownTextForRanges(
+            currentTranslationSourceMarkdown, ranges
+        ).trim();
+        let saveScope = hits.some(excerpt => excerpt.sourceKind === 'sentence-group')
+            ? 'ai.translationSourceSaveGroup' : 'ai.translationSourceSaveSentence';
+        if (saveScope === 'ai.translationSourceSaveSentence' && ranges.length > 1) {
+            saveScope = 'ai.translationSourceSaveSentences';
+        }
+        if (hits.length && includedBlocks.length) saveScope = 'ai.translationSourceSaveMixed';
+        else if (!hits.length) saveScope = includedBlocks.length > 1
+            ? 'ai.translationSourceSaveScopePlural' : 'ai.translationSourceSaveScope';
         return {
-            blockCount: ranges.length,
-            text: display.filter(Boolean).join('\n\n'),
-            annotation: ranges.length && !overCap && annotationText.every(Boolean)
-                ? {
-                    source: 'markdown',
-                    type: 'highlight',
-                    comment: '',
-                    color: '#ffd400',
-                    text: annotationText.join('\n\n'),
-                    ranges: ranges.map(({ from, to }) => ({ from, to })),
-                }
-                : null,
+            blockCount,
+            saveScope,
+            text: excerpts.map(({ id, sourceFrom, sourceTo }) => (
+                sourceExcerptText(id, sourceFrom, sourceTo)
+            )).filter(Boolean).join('\n\n'),
+            annotation: text ? {
+                source: 'markdown',
+                type: 'highlight',
+                comment: '',
+                color: '#ffd400',
+                text,
+                ranges,
+            } : null,
             annotationUnavailable: overCap ? t('annotation.sourceBlockUnavailable', {
                 count: MAX_TRANSLATED_SELECTION_BLOCKS,
             }) : null,

@@ -1,3 +1,4 @@
+import { MAX_PDF_ANNOTATION_GROUP_MEMBERS } from '../core/pdf-annotation-groups.js';
 import {
     isZoteroAnnotationColor,
     MAX_PDF_ANNOTATION_TEXT_LENGTH,
@@ -101,20 +102,33 @@ export function createZoteroAnnotationActions(zotero, {
             if (!attachment?.isPDFAttachment?.()) {
                 throw new Error('PDF attachment is unavailable');
             }
-            const locatedText = await textLocator(itemID, text, {
-                reader,
-                pdfPageIndexHint,
-                ...(pdfRegion ? { pdfRegion } : {}),
-                textQuote,
-                ...(context?.pdfCaptionEvidence
-                    ? { pdfCaptionEvidence: context.pdfCaptionEvidence }
-                    : {}),
-                signal,
-            });
-            throwIfAborted(signal);
-            if (!locatedText) return { deferred: true };
-            const located = validateLocatedText(locatedText);
-            const parts = located.segments || [located];
+            const queries = draft.pdfTextParts || [{ text, pdfPageIndexHint, pdfRegion, textQuote }];
+            const parts = [];
+            for (const query of queries) {
+                const locatedText = await textLocator(itemID, query.text, {
+                    reader,
+                    pdfPageIndexHint: query.pdfPageIndexHint,
+                    ...(query.pdfRegion ? { pdfRegion: query.pdfRegion } : {}),
+                    textQuote: query.textQuote,
+                    ...(context?.pdfCaptionEvidence
+                        ? { pdfCaptionEvidence: context.pdfCaptionEvidence }
+                        : {}),
+                    signal,
+                });
+                throwIfAborted(signal);
+                if (!locatedText) return { deferred: true };
+                const located = validateLocatedText(locatedText);
+                const segments = located.segments || [located];
+                if (draft.pdfTextParts && segments.some(segment => parts.some(previous => (
+                    sameAnnotationPosition(previous.position, segment.position)
+                )))) {
+                    throw new Error('PDF annotation fragments resolve to the same position');
+                }
+                parts.push(...segments);
+                if (draft.pdfTextParts && parts.length > MAX_PDF_ANNOTATION_GROUP_MEMBERS) {
+                    throw new Error('Too many PDF annotation fragments');
+                }
+            }
             const savedParts = [];
             const createdIDs = [];
             try {
@@ -128,10 +142,13 @@ export function createZoteroAnnotationActions(zotero, {
                         sortIndex: part.sortIndex,
                         position: part.position,
                     };
+                    // A multipart highlight owns its parts. Separate user
+                    // highlights at the same positions keep their own identity.
                     const existing = await findMatchingAnnotation(
                         zotero,
                         attachment,
-                        json
+                        json,
+                        draft.pdfTextParts && parts.length > 1 ? ownedAnnotationIDs : null
                     );
                     throwIfAborted(signal);
                     if (existing) {
@@ -302,7 +319,7 @@ function normalizeTextDraft(draft, { requireColor }) {
     };
 }
 
-async function findMatchingAnnotation(zotero, attachment, draft) {
+async function findMatchingAnnotation(zotero, attachment, draft, ownedIDs = null) {
     if (typeof attachment.getAnnotations !== 'function') return null;
     await zotero.Items.loadDataTypes?.([attachment], ['childItems']);
     const annotations = attachment.getAnnotations(false);
@@ -313,6 +330,7 @@ async function findMatchingAnnotation(zotero, attachment, draft) {
     );
     return annotations.find(annotation => (
         annotation?.annotationType === draft.type
+        && (!ownedIDs || ownedIDs.has(String(annotation.key || '')))
         && annotation.annotationText === draft.text
         && annotation.isEditable?.() !== false
         && sameAnnotationPosition(

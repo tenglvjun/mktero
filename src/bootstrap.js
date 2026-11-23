@@ -727,8 +727,8 @@ globalThis.startup = async function startup({ id, rootURI }) {
         changePDFAnnotationColor: (itemID, annotationID, color) => (
             runtime.annotationActions.changeColor(itemID, annotationID, color)
         ),
-        onPDFAnnotationGroup: (itemID, annotationIDs) => (
-            annotationGroups.record(itemID, annotationIDs)
+        onPDFAnnotationGroup: (itemID, annotationIDs, options) => (
+            annotationGroups.record(itemID, annotationIDs, options)
         ),
         onPDFAnnotationsDeleted: (itemID, annotationIDs) => (
             annotationGroups.forget(itemID, annotationIDs)
@@ -1162,6 +1162,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
         extractor,
         annotationOverlay,
         localAnnotations,
+        annotationGroups,
         savedResolver: runtime.savedMarkdownResolver,
         translate: runtimeTranslate,
     });

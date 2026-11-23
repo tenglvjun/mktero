@@ -143,7 +143,7 @@ export class MarkdownLocalAnnotations {
         figureMap = null,
         sourceHash = null,
     } = {}) {
-        const documentContext = { evidence: null };
+        const documentContext = { evidence: null, markdown };
         if (this.active) this.captionEvidenceContexts.set(itemID, documentContext);
         if (typeof markdown !== 'string') {
             throw new TypeError('Markdown must be a string');
@@ -194,6 +194,8 @@ export class MarkdownLocalAnnotations {
                 blockedSynchronizationIDs: new Set(),
             };
         }
+        this.#blockSynchronization(itemID, new Set(resolved.unmatched
+            .filter(annotation => annotation.pdfTextParts).map(annotation => annotation.id)));
         const refreshed = refreshAnnotationAnchors(
             annotations,
             resolved.matched,
@@ -584,11 +586,17 @@ export class MarkdownLocalAnnotations {
             const owned = this.ownedPDFAnnotations
                 .get(itemID)
                 ?.get(annotation.id);
+            const document = this.captionEvidenceContexts.get(itemID);
+            if (annotation.pdfTextParts && document
+                && !markdownAnnotationRangeMatchesSource(document.markdown, annotation.ranges, annotation.text)) {
+                return;
+            }
             const saved = await this.createPDFAnnotation(itemID, {
                 text: annotation.text,
                 comment: annotation.comment,
                 color: annotation.color,
                 ranges: annotation.ranges,
+                ...(annotation.pdfTextParts ? { pdfTextParts: annotation.pdfTextParts } : {}),
                 ...(owned?.size
                     ? { ownedAnnotationIDs: [...owned] }
                     : {}),
@@ -613,6 +621,22 @@ export class MarkdownLocalAnnotations {
                 ));
                 if (!target) return 'deleted';
                 if (!sameAnnotation(target, annotation)) return 'changed';
+                const owned = this.#ownedIDs(itemID, annotation.id);
+                const parts = synchronizedPDFAnnotationIDs(saved).filter(id => owned.includes(id));
+                if (annotation.pdfTextParts && parts.length > 1) {
+                    const recorded = await this.onPDFAnnotationGroup(itemID, parts, { selection: true });
+                    if (recorded === false) {
+                        if (this.deletePDFAnnotation) {
+                            const deleted = await Promise.allSettled(parts.map(id => (
+                                this.deletePDFAnnotation(itemID, id)
+                            )));
+                            for (const result of deleted) {
+                                if (result.status === 'rejected') this.#reportError(result.reason);
+                            }
+                        }
+                        throw new Error('Could not store the PDF annotation group');
+                    }
+                }
                 await this.store.put(
                     itemID,
                     current.filter(existing => existing.id !== annotation.id)
@@ -636,7 +660,7 @@ export class MarkdownLocalAnnotations {
                 );
                 const parts = synchronizedPDFAnnotationIDs(saved)
                     .filter(id => owned.has(id));
-                if (parts.length > 1) {
+                if (!annotation.pdfTextParts && parts.length > 1) {
                     this.#notifyHook(this.onPDFAnnotationGroup, itemID, parts);
                 }
                 this.#clearSynchronizationBlocks(itemID, [annotation.id]);
@@ -908,6 +932,10 @@ function resolveAnnotations(markdown, annotations) {
             ));
             continue;
         }
+        if (annotation.pdfTextParts) {
+            unmatched.push({ ...annotation, reason: 'not-found' });
+            continue;
+        }
         let result = locateAnnotationText(indexes, annotation, annotation.text);
         // A caption highlight saved before the reader undid an image
         // description's doubled backslash still reads "\\Delta". Its text
@@ -1094,6 +1122,36 @@ function repairedAnnotationText(markdown, ranges, text) {
     return current;
 }
 
+export function createPDFAnnotationTextParts(markdown, ranges, sourceMap, chromeRanges = []) {
+    const visible = createVisibleMarkdownTextIndex(markdown, chromeRanges, { imageMath: true });
+    return pdfAnnotationTextParts(markdown, ranges, sourceMap, visible);
+}
+
+function pdfAnnotationTextParts(markdown, ranges, sourceMap, visible) {
+    const groups = [];
+    for (const range of ranges) {
+        const previous = groups.at(-1);
+        const end = previous?.at(-1).to;
+        if (previous && !visibleMarkdownTextForRanges(markdown, [{ from: end, to: range.from }]).trim()) {
+            previous.push(range);
+        }
+        else groups.push([range]);
+    }
+    return groups.map(group => {
+        const text = visibleMarkdownTextForRanges(markdown, group).trim();
+        const range = { from: group[0].from, to: group.at(-1).to };
+        const pdfPageIndexHint = resolvePDFPageIndexHint(sourceMap, range, markdown.length);
+        const pdfRegion = resolveSourceMapRegion(sourceMap, range, markdown.length);
+        const textQuote = createTextQuoteFromVisibleIndex(range, visible);
+        return {
+            text,
+            ...(pdfPageIndexHint == null ? {} : { pdfPageIndexHint }),
+            ...(pdfRegion ? { pdfRegion } : {}),
+            ...(textQuote ? { textQuote } : {}),
+        };
+    });
+}
+
 export function createMarkdownAnnotationTextQuote(
     markdown,
     rangeOrRanges,
@@ -1179,7 +1237,8 @@ function sameAnnotation(left, right) {
         && left.pdfPageIndexHint === right.pdfPageIndexHint
         && samePDFRegion(left.pdfRegion, right.pdfRegion)
         && sameTextQuote(left.textQuote, right.textQuote)
-        && sameStoredRanges(left.ranges, right.ranges);
+        && sameStoredRanges(left.ranges, right.ranges)
+        && JSON.stringify(left.pdfTextParts) === JSON.stringify(right.pdfTextParts);
 }
 
 function sameTextQuote(left, right) {
@@ -1214,6 +1273,28 @@ function normalizeAnnotation(value) {
     const ranges = normalizeAnnotationRanges(value?.ranges);
     const pdfPageIndexHint = value?.pdfPageIndexHint;
     const pdfRegion = normalizePDFRegion(value?.pdfRegion);
+    const storedParts = value?.pdfTextParts;
+    if (storedParts !== undefined && (!Array.isArray(storedParts)
+        || !storedParts.length || storedParts.length > ranges.length)) {
+        throw new Error('Invalid PDF annotation fragments');
+    }
+    const pdfTextParts = storedParts?.map(part => {
+        const text = String(part?.text || '');
+        const hint = part?.pdfPageIndexHint;
+        const region = normalizePDFRegion(part?.pdfRegion);
+        const quote = normalizePDFAnnotationTextQuote(part?.textQuote);
+        if (!text.trim() || text.length > MAX_PDF_ANNOTATION_TEXT_LENGTH
+            || (hint !== undefined && (!Number.isSafeInteger(hint) || hint < 0))
+            || (part?.pdfRegion !== undefined && !region)) {
+            throw new Error('Invalid PDF annotation fragment');
+        }
+        return {
+            text,
+            ...(hint === undefined ? {} : { pdfPageIndexHint: hint }),
+            ...(region ? { pdfRegion: region } : {}),
+            ...(quote ? { textQuote: quote } : {}),
+        };
+    });
     let textQuote;
     try {
         textQuote = normalizePDFAnnotationTextQuote(value?.textQuote);
@@ -1232,7 +1313,9 @@ function normalizeAnnotation(value) {
             && (!Number.isSafeInteger(pdfPageIndexHint)
                 || pdfPageIndexHint < 0))
         || (value?.pdfRegion !== undefined && !pdfRegion)
-        || !ranges.length) {
+        || !ranges.length
+        || (pdfTextParts && normalizeVisibleText(pdfTextParts.map(part => part.text).join(' '))
+            !== normalizeVisibleText(text))) {
         throw new Error('Invalid Markdown annotation');
     }
     return {
@@ -1246,6 +1329,7 @@ function normalizeAnnotation(value) {
         ...(pdfPageIndexHint === undefined ? {} : { pdfPageIndexHint }),
         ...(pdfRegion ? { pdfRegion } : {}),
         ...(textQuote ? { textQuote } : {}),
+        ...(pdfTextParts ? { pdfTextParts } : {}),
     };
 }
 
@@ -1344,6 +1428,16 @@ function refreshAnnotationAnchors(
         }));
         const primary = storedRanges[0];
         const text = matchedTexts.get(annotation.id) ?? annotation.text;
+        const partWork = (sourceMap?.length || 0) * storedRanges.length;
+        const partSourceMap = partWork <= remainingWork ? sourceMap : null;
+        const pdfTextParts = annotation.pdfTextParts
+            ? pdfAnnotationTextParts(markdown, storedRanges, partSourceMap, visible)
+            : undefined;
+        if (pdfTextParts && partSourceMap) remainingWork -= partWork;
+        if (JSON.stringify(pdfTextParts) !== JSON.stringify(annotation.pdfTextParts)) {
+            changed = true;
+            changedIDs.add(annotation.id);
+        }
         if (text !== annotation.text) {
             changed = true;
             changedIDs.add(annotation.id);
@@ -1353,6 +1447,7 @@ function refreshAnnotationAnchors(
                 ...annotation,
                 text,
                 ranges: storedRanges,
+                ...(pdfTextParts ? { pdfTextParts } : {}),
             },
             {
                 from: primary.from,
@@ -1431,6 +1526,7 @@ function applyRefreshedAnnotationAnchors(annotation, current) {
             : { pdfPageIndexHint: current.pdfPageIndexHint }),
         ...(current?.pdfRegion ? { pdfRegion: current.pdfRegion } : {}),
         ...(current?.textQuote ? { textQuote: current.textQuote } : {}),
+        ...(current?.pdfTextParts ? { pdfTextParts: current.pdfTextParts } : {}),
     };
 }
 
@@ -1469,6 +1565,9 @@ function validateAggregateBudget(annotations) {
         length
         + (annotation.textQuote?.prefix.length || 0)
         + (annotation.textQuote?.suffix.length || 0)
+        + (annotation.pdfTextParts || []).reduce((total, part) => (
+            total + (part.textQuote?.prefix.length || 0) + (part.textQuote?.suffix.length || 0)
+        ), 0)
     ), 0);
     if (contextLength > MAX_TOTAL_ANNOTATION_CONTEXT_LENGTH) {
         throw new Error('Markdown annotation context exceeds the safety limit');

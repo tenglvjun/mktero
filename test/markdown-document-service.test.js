@@ -5,6 +5,12 @@ import {
     MarkdownDocumentService,
 } from '../src/core/markdown-document-service.js';
 import { MarkdownAnnotationOverlay } from '../src/core/markdown-annotation-overlay.js';
+import {
+    createPDFAnnotationTextParts,
+    MarkdownLocalAnnotations,
+} from '../src/core/markdown-local-annotations.js';
+import { PDFAnnotationGroups } from '../src/core/pdf-annotation-groups.js';
+import { projectSourceAnnotationRanges } from '../src/editor/translation-presentation.js';
 
 function createPdfItem(overrides = {}) {
     return {
@@ -386,4 +392,83 @@ test('allows a fresh conversion while an aborted conversion is settling', async 
     await assert.rejects(first, error => error.name === 'AbortError');
     assert.equal((await second).markdown, '# Fresh conversion');
     assert.equal(calls, 2);
+});
+
+
+test('reopens a translated annotation whose first sentence spans two PDF pages', async () => {
+    const source = 'Initial results carried over. This sentence stays unmarked. Final evidence.';
+    const first = 'Initial results carried over.';
+    const last = 'Final evidence.';
+    const lastStart = source.indexOf(last);
+    const ranges = [{ from: 0, to: first.length }, { from: lastStart, to: source.length }];
+    const annotationStore = makeStore();
+    const groupStore = makeStore();
+    let finished;
+    const synchronized = new Promise(resolve => { finished = resolve; });
+    const pdf = [
+        { id: 'PAGE001', text: 'Initial results', pageIndex: 0 },
+        { id: 'PAGE002', text: 'carried over.', pageIndex: 1 },
+        { id: 'PAGE003', text: last, pageIndex: 1 },
+    ].map((annotation, index) => ({
+        ...annotation, source: 'pdf', type: 'highlight', color: '#ffd400',
+        pageLabel: String(annotation.pageIndex + 1), sortIndex: String(index),
+    }));
+    const groups = new PDFAnnotationGroups({ store: groupStore });
+    const local = new MarkdownLocalAnnotations({
+        store: annotationStore,
+        createID: () => 'integration-1',
+        createPDFAnnotation: async (_itemID, draft) => {
+            assert.deepEqual(draft.pdfTextParts.map(part => part.text), [first, last]);
+            return { id: pdf[0].id, annotationIDs: pdf.map(part => part.id),
+                createdAnnotationIDs: pdf.map(part => part.id) };
+        },
+        onPDFAnnotationGroup: (...args) => groups.record(...args),
+        onSynchronizationChange: finished,
+        onError: error => finished(error),
+    });
+    await local.create(42, {
+        ranges, text: first + ' ' + last,
+        pdfTextParts: createPDFAnnotationTextParts(source, ranges),
+    });
+    assert.equal(await synchronized, 42);
+
+    const reopened = new MarkdownDocumentService({
+        extractor: {},
+        annotationOverlay: new MarkdownAnnotationOverlay({
+            extractor: { extract: async () => pdf },
+        }),
+        annotationGroups: new PDFAnnotationGroups({ store: groupStore }),
+        localAnnotations: new MarkdownLocalAnnotations({ store: annotationStore }),
+    });
+    const { annotationOverlay } = await reopened.resolveAnnotations(42, source);
+    assert.equal(annotationOverlay.matched.length, 1);
+    const [annotation] = annotationOverlay.matched;
+    assert.equal(annotation.id, 'PAGE001');
+    assert.deepEqual(annotation.ranges, [
+        { from: 0, to: 'Initial results'.length },
+        { from: source.indexOf('carried over.'), to: first.length },
+        ranges[1],
+    ]);
+    assert.deepEqual(projectSourceAnnotationRanges(annotation.ranges, {
+        sourceMarkdown: source,
+        translatedMarkdown: 'Alpha. Skip. Omega.',
+        groupedPDFSelection: true,
+        blockRanges: [{
+            sourceFrom: 0, sourceTo: source.length, translatedFrom: 0, translatedTo: 19,
+            alignmentUnits: [
+                { id: 'first', sourceRanges: [ranges[0]], translatedFrom: 0, translatedTo: 6 },
+                { id: 'skip', sourceRanges: [{ from: first.length + 1, to: lastStart - 1 }],
+                    translatedFrom: 7, translatedTo: 12 },
+                { id: 'last', sourceRanges: [ranges[1]], translatedFrom: 13, translatedTo: 19 },
+            ],
+        }],
+    }), [{ from: 0, to: 6 }, { from: 13, to: 19 }]);
+
+    function makeStore() {
+        let records = [];
+        return {
+            get: async () => structuredClone(records),
+            put: async (_itemID, value) => { records = structuredClone(value); },
+        };
+    }
 });

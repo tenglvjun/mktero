@@ -52,6 +52,19 @@ function createWholeBlockRow(document, initialAction, t, reposition, index, coun
     element.setAttribute('aria-label', title.textContent);
     const controls = appendText(element, 'mktero-translation-source-actions');
     const show = appendButton(controls, 'show-source-block', t('ai.translationLegacyShow'));
+    const include = initialAction.onToggleInclude
+        ? appendButton(controls, 'include-source-block', t('ai.translationLegacyInclude')) : null;
+    const updateControls = () => {
+        if (!include) return;
+        show.hidden = action.shown === true;
+        include.hidden = !action.shown;
+        include.textContent = t(action.included ? 'ai.translationLegacyExclude' : 'ai.translationLegacyInclude');
+        include.setAttribute('aria-pressed', String(action.included === true));
+    };
+    updateControls();
+    include?.addEventListener('click', () => {
+        if (element.isConnected) action.onToggleInclude?.();
+    });
     const showError = appendText(element, 'mktero-selection-translation-error');
     showError.setAttribute('role', 'status');
     let original = null;
@@ -60,6 +73,7 @@ function createWholeBlockRow(document, initialAction, t, reposition, index, coun
         showError.textContent = '';
         try {
             const text = action.onShowBlock();
+            if (action.shown) include?.focus();
             if (typeof text === 'string' && text.trim() && element.isConnected) {
                 if (!original) {
                     original = appendText(element, 'mktero-translation-source-text');
@@ -78,7 +92,10 @@ function createWholeBlockRow(document, initialAction, t, reposition, index, coun
     return {
         element,
         id: initialAction.id,
-        refresh: next => { action = next; },
+        refresh(next) {
+            action = next;
+            updateControls();
+        },
     };
 }
 

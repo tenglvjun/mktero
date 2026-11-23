@@ -128,11 +128,11 @@ Viewing the original, copying the translation, and navigating there and back all
 
 **When reliable sentence IDs are unavailable**, explicitly choose `Show the whole original block` to read that block locally. Mktero does not guess which source words or characters correspond to the selection. Verified sentence IDs are also required in lists and tables, where a translation may reorder items or cells. If your selection spans aligned and unaligned blocks, you can see the verified sentences and open the remaining blocks individually.
 
-**Saving an annotation covers complete original blocks.**
+**Save the matching original sentences.**
 
-In both views, the original preview has `Save to Annotations` beside `Locate original text` on the same action row. When saving is available, expand the collapsed save-scope section to review all the original text that will be saved. The sentence preview still shows just the matched original sentences.
+In both views, choose `Save to Annotations` in the original preview. Even a partial translated selection saves the complete original sentence or sentence group. Expand the save scope to review the exact text. For an unaligned passage with a known original block, open the block and explicitly include it in the save. You can save from up to eight original blocks at once.
 
-Saving uses the complete blocks of the current original text, up to eight per selection; it does not save translated wording or just the matched sentences. Beyond eight blocks, you can still read and locate the original. Only `Save to Annotations` creates an annotation; opening the preview or save scope, or locating the original, does not. Saving works locally and neither creates a Zotero note nor adds content to an existing note.
+Separate original fragments keep their own ranges. Mktero locates each fragment in the PDF before creating the Zotero highlights. If any fragment cannot be located reliably, the annotation stays visible in Markdown with its synchronization status.
 
 After saving, the corresponding translated passage is highlighted, and the left column's `Annotations` segment lists the same annotation. Switching between Original, Translation, and Bilingual does not create another copy. Annotations stay anchored to the source for PDF location. An existing annotation without a reliable match in the translation stays in the sidebar, but no translated text is highlighted for it.
 

@@ -14,6 +14,7 @@ export class MarkdownDocumentService {
         extractor,
         annotationOverlay = null,
         localAnnotations = null,
+        annotationGroups = null,
         savedResolver = null,
         translate = translateEnglish,
     }) {
@@ -23,6 +24,7 @@ export class MarkdownDocumentService {
         this.extractor = extractor;
         this.annotationOverlay = annotationOverlay;
         this.localAnnotations = localAnnotations;
+        this.annotationGroups = annotationGroups;
         this.savedResolver = savedResolver;
         this.translate = translate;
         this.inFlight = new Map();
@@ -131,7 +133,8 @@ export class MarkdownDocumentService {
                 { sourceMap }
             );
             const { warning, ...annotationOverlay } = annotationResult;
-            overlays.push(annotationOverlay);
+            const groups = await this.annotationGroups?.selectionGroups(itemID);
+            overlays.push(groups?.length ? groupPDFSelections(annotationOverlay, groups) : annotationOverlay);
             if (warning) warnings.push(warning);
         }
         if (this.localAnnotations) {
@@ -189,6 +192,31 @@ export class MarkdownDocumentService {
             ],
         };
     }
+}
+
+function groupPDFSelections(overlay, groups) {
+    const matched = new Map((overlay.matched || []).map(annotation => [annotation.id, annotation]));
+    const unmatched = new Map((overlay.unmatched || []).map(annotation => [annotation.id, annotation]));
+    for (const group of groups) {
+        const parts = group.map(id => matched.get(id) || unmatched.get(id)).filter(Boolean);
+        if (parts.length < 2) continue;
+        const primary = parts[0];
+        const matchedRanges = new Map(parts.map(part => [part.id, matched.get(part.id)?.ranges]));
+        const ranges = [...matchedRanges.values()].flatMap(ranges => ranges || [])
+            .sort((left, right) => left.from - right.from || left.to - right.to);
+        for (const part of parts) {
+            matched.delete(part.id);
+            unmatched.delete(part.id);
+        }
+        const annotation = {
+            ...primary,
+            text: parts.map(part => part.text).join(' '),
+            ranges,
+            pdfAnnotationParts: parts.map(part => ({ id: part.id, ranges: matchedRanges.get(part.id) || [] })),
+        };
+        (ranges.length ? matched : unmatched).set(annotation.id, annotation);
+    }
+    return { matched: [...matched.values()], unmatched: [...unmatched.values()] };
 }
 
 function copyIdentity(target, source) {

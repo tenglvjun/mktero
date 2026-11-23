@@ -114,9 +114,11 @@ When the PDF character stream differs from the two-column reading order, Mktero 
 
 A cross-page selection becomes one single-page Zotero highlight per page, keeping the whole Markdown selection navigable. A paragraph that resumes a page or two later is located the same way, across a full-page figure or running footer in between.
 
-#### Cross-page groups
+#### Groups for cross-page and disjoint highlights
 
 Changing one part's color, or deleting it from Markdown, affects every part Mktero created for that selection. A comment stays on the part where it was written.
+
+A translated selection can produce several Zotero highlights when the original passages are disjoint, even on the same PDF page. Mktero displays the group as one annotation in the reader.
 
 Mktero stores group membership in `mktero-annotations/groups-v1` in the Zotero profile, using only Zotero annotation keys. Parts that matched pre-existing Zotero highlights are never grouped or deleted this way; parts already deleted in Zotero's reader are skipped. Cross-page highlights created before grouping was available have no group and change one part at a time.
 

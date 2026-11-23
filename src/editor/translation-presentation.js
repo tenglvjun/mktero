@@ -33,7 +33,9 @@ export function applyTranslationPresentation(element, value) {
 // blockRanges is the current view index, not the stored translation records.
 // Its alignmentUnits are present only after source and reassembly verification.
 export function projectSourceAnnotationRanges(ranges, options) {
-    const { sourceMarkdown, translatedMarkdown, blockRanges } = options || {};
+    const {
+        sourceMarkdown, translatedMarkdown, blockRanges, groupedPDFSelection, getSourceTextIndex,
+    } = options || {};
     if (typeof sourceMarkdown !== 'string' || typeof translatedMarkdown !== 'string'
         || !Array.isArray(ranges) || !Array.isArray(blockRanges)) return [];
 
@@ -51,9 +53,28 @@ export function projectSourceAnnotationRanges(ranges, options) {
         selectionEnds.push(coverage.at(-1).to);
     }
     const coverageEnds = coverage.map(range => range.to);
+    let visibleIndex;
     const covers = (from, to) => {
-        const containing = coverage[firstEndAfter(coverageEnds, from)];
-        return containing?.from <= from && containing.to >= to;
+        const start = firstEndAfter(coverageEnds, from);
+        const first = coverage[start];
+        if (first?.from <= from && first.to >= to) return true;
+        if (!groupedPDFSelection || !first || first.from >= to) return false;
+        // PDF text quotes may omit markup or whitespace at a page boundary.
+        // Only bridge gaps containing no visible text.
+        visibleIndex ||= getSourceTextIndex?.()
+            || createVisibleMarkdownTextIndex(sourceMarkdown, [], { imageMath: true });
+        let cursor = from;
+        for (let index = start; index < coverage.length && coverage[index].from < to; index++) {
+            const part = coverage[index];
+            if (cursor < part.from && visibleIndex.text.slice(
+                visibleIndex.visibleOffsetAt(cursor), visibleIndex.visibleOffsetAt(part.from)
+            ).trim()) return false;
+            cursor = part.to;
+            if (cursor >= to) return true;
+        }
+        return !visibleIndex.text.slice(
+            visibleIndex.visibleOffsetAt(cursor), visibleIndex.visibleOffsetAt(to)
+        ).trim();
     };
 
     const projected = [];
