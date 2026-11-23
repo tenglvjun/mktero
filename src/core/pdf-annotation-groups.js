@@ -15,7 +15,7 @@ import { isPDFAnnotationUnavailableError } from './pdf-annotation.js';
 const MAX_GROUPS_PER_ITEM = 2_000;
 // Matches the code the annotation store puts on an unreadable file.
 const INVALID_STORE_ERROR_CODE = 'MARKDOWN_ANNOTATION_STORE_INVALID';
-const MAX_MEMBERS_PER_GROUP = 64;
+export const MAX_PDF_ANNOTATION_GROUP_MEMBERS = 64;
 const ZOTERO_ANNOTATION_KEY = /^[A-Za-z0-9]{1,32}$/;
 
 export class PDFAnnotationGroups {
@@ -30,18 +30,15 @@ export class PDFAnnotationGroups {
 
     // Records the parts of one highlight. A part already in another group
     // leaves that group: it now belongs to this highlight.
-    record(itemID, annotationIDs) {
+    record(itemID, annotationIDs, { selection = false } = {}) {
         const members = normalizeMembers(annotationIDs);
         if (members.length < 2) return Promise.resolve(false);
         return this.#safely(itemID, false, async () => {
             const groups = await this.#read(itemID);
             const memberSet = new Set(members);
-            const kept = groups
-                .map(group => group.filter(id => !memberSet.has(id)))
-                .filter(group => group.length > 1);
-            kept.push(members);
-            while (kept.length > MAX_GROUPS_PER_ITEM) kept.shift();
-            await this.store.put(itemID, kept);
+            const kept = withoutMembers(groups, memberSet);
+            kept.push({ members, selection });
+            await this.#write(itemID, kept.slice(-MAX_GROUPS_PER_ITEM));
             return true;
         });
     }
@@ -52,9 +49,15 @@ export class PDFAnnotationGroups {
         const id = String(annotationID || '');
         return this.#safely(itemID, [id], async () => {
             const groups = await this.#read(itemID);
-            const group = groups.find(candidate => candidate.includes(id));
-            return group ? [id, ...group.filter(member => member !== id)] : [id];
+            const group = groups.find(candidate => candidate.members.includes(id));
+            return group ? [id, ...group.members.filter(member => member !== id)] : [id];
         });
+    }
+
+    selectionGroups(itemID) {
+        return this.#safely(itemID, [], async () => (
+            (await this.#read(itemID)).filter(group => group.selection).map(group => group.members)
+        ));
     }
 
     // Drops annotations that no longer exist. A group left with one member is
@@ -64,14 +67,12 @@ export class PDFAnnotationGroups {
         if (!gone.size) return Promise.resolve(false);
         return this.#safely(itemID, false, async () => {
             const groups = await this.#read(itemID);
-            const kept = groups
-                .map(group => group.filter(id => !gone.has(id)))
-                .filter(group => group.length > 1);
+            const kept = withoutMembers(groups, gone);
             if (kept.length === groups.length
-                && kept.every((group, index) => group.length === groups[index].length)) {
+                && kept.every((group, index) => group.members.length === groups[index].members.length)) {
                 return false;
             }
-            await this.store.put(itemID, kept);
+            await this.#write(itemID, kept);
             return true;
         });
     }
@@ -117,9 +118,16 @@ export class PDFAnnotationGroups {
         }
         if (!Array.isArray(value)) return [];
         return value
-            .map(normalizeMembers)
-            .filter(group => group.length > 1)
+            .map(group => ({
+                members: normalizeMembers(Array.isArray(group) ? group : group?.members),
+                selection: group?.selection === true,
+            }))
+            .filter(group => group.members.length > 1)
             .slice(-MAX_GROUPS_PER_ITEM);
+    }
+
+    #write(itemID, groups) {
+        return this.store.put(itemID, groups.map(group => group.selection ? group : group.members));
     }
 
     async #safely(itemID, fallback, operation) {
@@ -151,6 +159,13 @@ export class PDFAnnotationGroups {
     }
 }
 
+function withoutMembers(groups, removed) {
+    return groups.map(group => ({
+        ...group,
+        members: group.members.filter(id => !removed.has(id)),
+    })).filter(group => group.members.length > 1);
+}
+
 function normalizeMembers(value) {
     if (!Array.isArray(value)) return [];
     const members = [];
@@ -158,7 +173,7 @@ function normalizeMembers(value) {
         const id = String(entry ?? '');
         if (!ZOTERO_ANNOTATION_KEY.test(id) || members.includes(id)) continue;
         members.push(id);
-        if (members.length >= MAX_MEMBERS_PER_GROUP) break;
+        if (members.length >= MAX_PDF_ANNOTATION_GROUP_MEMBERS) break;
     }
     return members;
 }

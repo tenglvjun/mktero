@@ -2634,3 +2634,41 @@ function locatedAnnotationAtPage(text, pageIndex) {
         },
     };
 }
+
+
+test('locates every translated annotation fragment before writing any PDF highlights', async () => {
+    const attachment = { libraryID: 7, isPDFAttachment: () => true };
+    const writes = [];
+    const searches = [];
+    const actions = createZoteroAnnotationActions({
+        Items: { get: () => attachment },
+        Annotations: {
+            saveFromJSON: async (...args) => writes.push(args),
+        },
+    }, {
+        locateText: async (_itemID, text, { pdfPageIndexHint }) => {
+            searches.push({ text, pdfPageIndexHint });
+            if (text === 'Missing sentence.') return null;
+            return { text, pageLabel: '1', sortIndex: '00000|000001|00000',
+                position: { pageIndex: 0, rects: [[10, 10, 80, 20]] } };
+        },
+    });
+
+    const first = { text: 'Present sentence.', pdfPageIndexHint: 0 };
+    const missing = { text: 'Missing sentence.', pdfPageIndexHint: 2 };
+    const result = await actions.createFromText(42, {
+        text: first.text + ' ' + missing.text,
+        color: '#ffd400',
+        pdfTextParts: [first, missing],
+    });
+    assert.deepEqual(result, { deferred: true });
+    assert.deepEqual(searches, [first, missing]);
+    assert.deepEqual(writes, []);
+
+    await assert.rejects(actions.createFromText(42, {
+        text: first.text + ' ' + first.text,
+        color: '#ffd400',
+        pdfTextParts: [first, first],
+    }), /same position/);
+    assert.deepEqual(writes, []);
+});

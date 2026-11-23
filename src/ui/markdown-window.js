@@ -23,6 +23,7 @@ import {
 import {
     assertMarkdownAnnotationSegmentLimit,
     createMarkdownAnnotationTextQuote,
+    createPDFAnnotationTextParts,
     markdownAnnotationRangeMatchesSource,
     MarkdownLocalAnnotations,
 } from '../core/markdown-local-annotations.js';
@@ -1434,12 +1435,7 @@ class MarkdownTabView {
     // the page hint, the OCR region, and the quote context. Highlights and
     // "Add to Note" locate a selection the same way.
     async prepareMarkdownAnnotationDraft(annotation, selectionContext) {
-        // A translated-side selection reaches this point only after the reader
-        // resolved it to a whole original block and read the original text for
-        // that range. That flag is set by the editor's own translation
-        // selection path; it cannot be inferred from where a range happens to
-        // sit, or an ordinary source-side selection in Bilingual would be
-        // mistaken for one.
+        // Translated selections already carry verified source coordinates.
         const alreadySource = selectionContext?.rangesAreSource === true;
         if (!alreadySource && this.model.translationView === 'translated') {
             throw new Error('Markdown annotations require original text');
@@ -1468,7 +1464,7 @@ class MarkdownTabView {
             ? mappedAnnotation
             // New Markdown was published after the selection was read, for
             // example while a draft note was open. Find the text again.
-            : await relocateMarkdownAnnotation(
+            : alreadySource ? null : await relocateMarkdownAnnotation(
                 this.model.markdown,
                 mappedAnnotation || annotation
             );
@@ -1504,6 +1500,10 @@ class MarkdownTabView {
         );
         const draft = {
             ...sourceAnnotation,
+            ...(alreadySource ? {
+                pdfTextParts: createPDFAnnotationTextParts(this.model.markdown,
+                    sourceAnnotation.ranges, this.model.sourceMap, this.model.chromeRanges),
+            } : {}),
             ...(pdfPageIndexHint === null ? {} : { pdfPageIndexHint }),
             ...(pdfRegion ? { pdfRegion } : {}),
             ...(textQuote ? { textQuote } : {}),
@@ -1656,7 +1656,9 @@ class MarkdownTabView {
             this.noteAnnotationIndex = {
                 source: matched,
                 byID: new Map((Array.isArray(matched) ? matched : [])
-                    .map(item => [String(item?.id || ''), item])),
+                    .flatMap(item => (item.pdfAnnotationParts || [item]).map(part => (
+                        [String(part.id || ''), part]
+                    )))),
             };
         }
         const annotation = this.noteAnnotationIndex.byID.get(String(key || ''));
@@ -8877,8 +8879,15 @@ function translatedAnnotationOverlay(model, translatedMarkdown) {
         translatedMarkdown,
         blockRanges: model.translationBlockRanges,
     };
+    let sourceTextIndex;
     for (const annotation of source.matched || []) {
-        const ranges = projectSourceAnnotationRanges(annotation.ranges, projection);
+        const ranges = projectSourceAnnotationRanges(annotation.ranges, {
+            ...projection,
+            groupedPDFSelection: annotation.pdfAnnotationParts?.length > 1,
+            getSourceTextIndex: () => (sourceTextIndex ||= createVisibleMarkdownTextIndex(
+                model.markdown, model.chromeRanges || [], { imageMath: true }
+            )),
+        });
         if (ranges.length) matched.push({ ...annotation, ranges });
         else unmatched.push({ ...annotation, ranges: [], reason: 'translation-unmapped' });
     }

@@ -39,6 +39,8 @@ export function createTranslationSourcePopup(parent, {
             selectionContext,
             annotationUnavailable = null,
             blockCount = 1,
+            saveScope = null,
+            sourceUnavailable = '',
             wholeBlockActions = [],
             isCurrent = null,
         }) {
@@ -53,11 +55,13 @@ export function createTranslationSourcePopup(parent, {
                 annotationUnavailable: annotationUnavailable || (blockCount > MAX_SOURCE_BLOCKS
                     ? t('annotation.sourceBlockUnavailable', { count: MAX_SOURCE_BLOCKS }) : null),
                 blockCount,
+                saveScope,
+                sourceUnavailable,
                 wholeBlocks: normalizeWholeBlockActions(wholeBlockActions),
                 isCurrent,
             };
             const canPreview = options.text.trim() || options.wholeBlocks.length
-                || annotation || options.annotationUnavailable;
+                || annotation || options.annotationUnavailable || options.sourceUnavailable;
             const canCopy = typeof copyTranslation === 'function' && options.translatedText.trim();
             if (!anchor || (!canPreview && !canCopy)) {
                 anchoredPopup.close();
@@ -123,13 +127,17 @@ function createContent(document, t, initialOptions, {
     const isCurrent = () => element.isConnected && options.isCurrent?.() !== false;
     const canUse = button => button.isConnected && !button.disabled && isCurrent();
     const hasPreview = () => Boolean(options.text.trim() || options.wholeBlocks.length
-        || options.annotation || options.annotationUnavailable);
+        || options.annotation || options.annotationUnavailable || options.sourceUnavailable);
+    const saving = new Set();
     const guardedWholeBlocks = () => options.wholeBlocks.map(action => ({
         ...action,
         onShowBlock: () => {
-            if (panel !== 'preview' || !isCurrent()) return;
+            if (saving.has(options.annotation) || panel !== 'preview' || !isCurrent()) return;
             return action.onShowBlock();
         },
+        onToggleInclude: action.onToggleInclude && (() => {
+            if (!saving.has(options.annotation) && panel === 'preview' && isCurrent()) action.onToggleInclude();
+        }),
     }));
 
     const detachSave = save => {
@@ -180,8 +188,8 @@ function createContent(document, t, initialOptions, {
             Object.assign(preview, { details, scope, annotationBody: body, save });
         }
         preview.saveOptions = options;
-        preview.scope.textContent = t(options.blockCount > 1
-            ? 'ai.translationSourceSaveScopePlural' : 'ai.translationSourceSaveScope',
+        preview.scope.textContent = t(options.saveScope || (options.blockCount > 1
+            ? 'ai.translationSourceSaveScopePlural' : 'ai.translationSourceSaveScope'),
         { count: options.blockCount });
         preview.annotationBody.textContent = String(options.annotation.text || '');
         const save = preview.save;
@@ -193,11 +201,16 @@ function createContent(document, t, initialOptions, {
             selectionContext: options.selectionContext,
             createMarkdownAnnotation: typeof createMarkdownAnnotation === 'function'
                 ? async (...args) => {
+                    const [annotation] = args;
+                    saving.add(annotation);
                     try {
                         await createMarkdownAnnotation(...args);
                     }
                     catch (error) {
                         if (saveIsCurrent()) throw error;
+                    }
+                    finally {
+                        saving.delete(annotation);
                     }
                 } : null,
             close: () => { if (saveIsCurrent()) close(); },
@@ -230,7 +243,7 @@ function createContent(document, t, initialOptions, {
         else if (!canLocate) locate.remove();
         refreshPreviewSave();
         actions.hidden = !canLocate && !preview.save;
-        unavailable.textContent = options.annotationUnavailable || '';
+        unavailable.textContent = [options.sourceUnavailable, options.annotationUnavailable].filter(Boolean).join(' ');
         unavailable.hidden = !unavailable.textContent;
         const blocks = guardedWholeBlocks();
         if (preview.legacy && !preview.legacy.refresh(blocks)) {
