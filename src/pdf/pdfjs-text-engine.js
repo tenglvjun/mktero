@@ -108,6 +108,22 @@ export function createPDFJSTextEngine({
                 await release();
             }
         },
+        async pageViewports(fileData, pageIndexes, { signal } = {}) {
+            const { loadingTask, release } = openDocument(fileData, signal);
+            try {
+                const document = await loadingTask.promise;
+                const viewports = new Map();
+                for (const index of pageIndexes) {
+                    throwIfAborted(signal);
+                    const page = await document.getPage(index + 1);
+                    viewports.set(index, page.getViewport({ scale: 1 }));
+                }
+                return viewports;
+            }
+            finally {
+                await release();
+            }
+        },
         async extract(fileData, { signal } = {}) {
             const { loadingTask, release } = openDocument(fileData, signal);
             try {

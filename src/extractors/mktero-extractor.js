@@ -211,7 +211,7 @@ export class MkteroDocumentExtractor {
         }
     }
 
-    async readCached(itemID, { signal, onProgress } = {}) {
+    async readCached(itemID, { signal, onProgress, offline = false } = {}) {
         const opened = await this.#openPDF(itemID, signal);
         const prepared = await this.#prepareCachedRead(opened, {
             itemID,
@@ -220,7 +220,9 @@ export class MkteroDocumentExtractor {
         });
         prepared.assertScope = () => {};
         try {
-            const resolved = await this.#resolveIdentity(opened, prepared, { signal });
+            const resolved = offline
+                ? { offline: true, local: { modelVersion: MKTERO_MODEL_VLM } }
+                : await this.#resolveIdentity(opened, prepared, { signal });
             prepared.cachePublication = this.#claimPublication(prepared, resolved);
             return await this.#readCachedPrepared(opened, prepared, resolved, { signal, onProgress });
         }

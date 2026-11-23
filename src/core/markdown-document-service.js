@@ -49,6 +49,15 @@ export class MarkdownDocumentService {
 
     async #convert(itemID, options) {
         const extracted = await this.extractor.extract(itemID, options);
+        return this.#buildResult(itemID, extracted, { retryLocalAnnotations: true });
+    }
+
+    async readCached(itemID, options = {}) {
+        const extracted = await this.extractor.readCached(itemID, options);
+        return extracted ? this.#buildResult(itemID, extracted) : null;
+    }
+
+    async #buildResult(itemID, extracted, { retryLocalAnnotations = false } = {}) {
         const markdown = extracted.kind === 'markdown'
             ? extracted.markdown
             : extracted.kind === 'structured'
@@ -100,7 +109,7 @@ export class MarkdownDocumentService {
             itemID,
             markdown,
             {
-                retryLocalAnnotations: true,
+                retryLocalAnnotations,
                 figureMap: extracted.figureMap,
                 sourceHash: extracted.sourceHash,
                 sourceMap: Array.isArray(extracted.sourceMap)

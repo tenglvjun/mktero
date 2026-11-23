@@ -114,6 +114,7 @@ export class MarkdownTabPresenter {
 
     open(documentID, {
         sourceItemID = documentID,
+        select = true,
         onClose,
         onReparse,
         onOpenCitationGraph,
@@ -335,7 +336,7 @@ export class MarkdownTabPresenter {
             if (onExportEpub !== undefined) {
                 existing.view.render(existing.model);
             }
-            if (this.selectPresentation(existing, owner)) {
+            if (!select || this.selectPresentation(existing, owner)) {
                 return { ...existing, created: false };
             }
             this.finishPresentation(existing, MARKDOWN_TAB_CLOSE_REASONS.USER);
@@ -449,7 +450,7 @@ export class MarkdownTabPresenter {
                 type: TAB_TYPE,
                 title: model.title,
                 data: tabData,
-                select: true,
+                select,
                 preventJumpback: true,
                 onClose: () => {
                     if (!presentation) return;
@@ -468,12 +469,12 @@ export class MarkdownTabPresenter {
             };
             this.presentations.set(documentID, presentation);
             // The deck element is what Zotero notifies when this tab is
-            // selected. The first select already happened inside add().
+            // selected. add() already selected the tab when requested.
             result.container.onTabSelectionChanged = selected => {
                 view.handleTabSelection?.(selected);
                 this.syncContextPane(owner);
             };
-            view.handleTabSelection?.(true);
+            view.handleTabSelection?.(select);
             this.syncContextPane(owner);
         }
         catch (error) {

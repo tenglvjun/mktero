@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { revealPdfSelectionAsMarkdown } from '../src/ui/pdf-selection-markdown.js';
+import { resolveResearchExcerptRange, revealPdfSelectionAsMarkdown } from '../src/ui/pdf-selection-markdown.js';
 
 test('does not open Markdown when the cached source map has no unique passage', async () => {
     const opened = [];
@@ -173,3 +173,36 @@ function entry(markdownFrom, markdownTo, bbox) {
         locations: [{ pageIndex: 0, bbox }],
     };
 }
+
+
+test('rereading uses the saved PDF page and flashes the exact text of a short ordinary selection', () => {
+    const passage = 'The silver gauge (A) is stable.';
+    const markdown = passage + '\n\n' + passage;
+    const secondFrom = passage.length + 2;
+    const sourceMap = [
+        entry(0, passage.length, [0, 0, 10, 10]),
+        {
+            markdownFrom: secondFrom,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 1, bbox: [0, 0, 10, 10] }],
+        },
+    ];
+    const range = resolveResearchExcerptRange({
+        source: { markdown, sourceMap },
+        pages: [{ pageIndex: 1, rects: [[0, 0, 10, 10]] }],
+        text: '“silver gauge (A)”',
+        rectForBBox: (_page, bbox) => bbox,
+    });
+    assert.deepEqual(range, { markdownFrom: secondFrom + 4, markdownTo: secondFrom + 20 });
+    assert.equal(markdown.slice(range.markdownFrom, range.markdownTo), 'silver gauge (A)');
+});
+
+test('rereading leaves ambiguous cached text and text from other pages to the PDF', () => {
+    const markdown = 'The silver gauge. The silver gauge.';
+    const pages = [{ pageIndex: 1, rects: [[0, 0, 10, 10]] }];
+    for (const sourceMap of [[], [entry(0, markdown.length, [0, 0, 10, 10])]]) {
+        assert.equal(resolveResearchExcerptRange({
+            source: { markdown, sourceMap }, pages, text: 'silver gauge',
+        }), null);
+    }
+});

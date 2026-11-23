@@ -1221,12 +1221,51 @@ main {
 }
 
 .mktero-zotero-notes-list-view,
-.mktero-zotero-notes-editor-view {
+.mktero-zotero-notes-editor-view,
+.mktero-research-review {
     display: flex;
     min-height: 0;
     flex: 1 1 auto;
     flex-direction: column;
     overflow: hidden;
+}
+
+.mktero-research-review {
+    gap: 8px;
+    padding: 8px 10px;
+}
+
+.mktero-review-back,
+.mktero-review-append {
+    align-self: flex-start;
+}
+
+.mktero-review-excerpts {
+    min-height: 0;
+    overflow: auto;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.mktero-review-row {
+    padding: 8px 2px;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text);
+    font: 12px/1.5 var(--ui-font);
+}
+
+.mktero-review-excerpt {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.mktero-review-excerpt input {
+    flex: none;
+    accent-color: var(--accent);
 }
 
 .mktero-zotero-notes-header {

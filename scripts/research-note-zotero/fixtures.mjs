@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createMarkdownCacheKey } from '../../src/cache/markdown-cache.js';
+import { MISTRAL_PARSER_PROFILE_ID } from '../../src/mistral/parser-profile.js';
 import {
     fixturePrefs as sentenceFixturePrefs,
     prepareFixtures as prepareSentenceFixtures,
@@ -17,7 +19,7 @@ export const fixturePrefs = {
 export async function prepareFixtures(run, profile) {
     // Reuse the existing synthetic PDFs and Mistral Markdown cache. Their
     // translations are local mock output; this harness reads the original view.
-    const prepared = await prepareSentenceFixtures(run, profile);
+    const prepared = await prepareSentenceFixtures(run, profile, { secondPageForUnaligned: true });
     assert.equal(prepared.length, 2);
     const pdfs = await Promise.all(prepared.map(async (fixture, index) => {
         const pdf = await readFile(fixture.pdfPath);
@@ -26,6 +28,8 @@ export async function prepareFixtures(run, profile) {
         return {
             label: index === 0 ? 'A' : 'B',
             pdfPath: fixture.pdfPath,
+            cacheKey: await createMarkdownCacheKey(pdf, { parserProfile: MISTRAL_PARSER_PROFILE_ID }),
+            pageIndex: index,
             markdown: fixture.markdown,
             quote: fixture.sentences[0],
             followupQuote: fixture.sentences[1],

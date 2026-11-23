@@ -24,7 +24,7 @@ export const fixturePrefs = {
     'extensions.mktero.aiAutoTranslateSelection': false,
 };
 
-export async function prepareFixtures(run, profile) {
+export async function prepareFixtures(run, profile, { secondPageForUnaligned = false } = {}) {
     const cache = new MarkdownCache({
         rootPath: path.join(profile, 'mktero-cache', 'v1'),
         pathUtils: { ...path, parent: path.dirname, filename: path.basename },
@@ -54,7 +54,7 @@ export async function prepareFixtures(run, profile) {
             ? ['\u7425\u73c0\u706f\u4fdd\u6301\u7a33\u5b9a\u3002', '\u7d2b\u8272\u8868\u76d8\u6ca1\u6709\u58f0\u97f3\u3002']
             : ['\u94dc\u8d28\u5f00\u5173\u65ad\u5f00\u3002', '\u94f6\u8272\u4eea\u8868\u4fdd\u6301\u7a33\u5b9a\u3002'];
         const markdown = sentences.join(' ');
-        const pdf = syntheticPDF(markdown);
+        const pdf = syntheticPDF(markdown, { secondPage: !aligned && secondPageForUnaligned });
         const pdfPath = path.join(run, `${kind}.pdf`);
         await writeFile(pdfPath, pdf);
         const documentKey = await createMarkdownCacheKey(pdf, { parserProfile: MISTRAL_PARSER_PROFILE_ID });
@@ -104,7 +104,7 @@ export async function prepareFixtures(run, profile) {
     return fixtures;
 }
 
-function syntheticPDF(text) {
+function syntheticPDF(text, { secondPage = false } = {}) {
     const stream = `BT /F1 12 Tf 40 120 Td (${text}) Tj ET\n`;
     const objects = [
         '<< /Type /Catalog /Pages 2 0 R >>',
@@ -113,6 +113,14 @@ function syntheticPDF(text) {
         `<< /Length ${stream.length} >>\nstream\n${stream}endstream`,
         '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
     ];
+    if (secondPage) {
+        objects[1] = '<< /Type /Pages /Count 2 /Kids [3 0 R 6 0 R] >>';
+        objects[2] = objects[2].replace('/Contents 4 0 R', '/Contents 7 0 R').replace('600 180', '600 780');
+        const cover = 'BT /F1 12 Tf 40 120 Td (Synthetic cover page) Tj ET\n';
+        objects.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 780] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+            '<< /Length ' + cover.length + ' >>\nstream\n' + cover + 'endstream');
+    }
+    const size = objects.length + 1;
     let pdf = '%PDF-1.4\n';
     const offsets = objects.map((object, i) => {
         const offset = pdf.length;
@@ -120,7 +128,7 @@ function syntheticPDF(text) {
         return offset;
     });
     const xref = pdf.length;
-    pdf += 'xref\n0 6\n0000000000 65535 f \n';
+    pdf += 'xref\n0 ${size}\n0000000000 65535 f \n';
     for (const offset of offsets) pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
-    return Buffer.from(`${pdf}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`, 'ascii');
+    return Buffer.from(`${pdf}trailer\n<< /Size ${size} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`, 'ascii');
 }
