@@ -10,6 +10,7 @@ import {
     MarkdownAnnotationOverlay,
 } from '../src/core/markdown-annotation-overlay.js';
 import { visibleDocumentChromeRanges } from '../src/markdown/chrome-ranges.js';
+import { normalizeMarkdownFigureCaptions } from '../src/markdown/markdown-figures.js';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
 import {
     collectMarkdownTranslationBlocks,
@@ -7278,6 +7279,59 @@ test('renders EvoBrain model notation inside its figure caption', () => {
 
     editor.destroy();
     dom.window.close();
+});
+
+test('renders translated figure caption math identically in both reading modes', t => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const caption = String.raw`Fig. 1 | [A] Azimuth $\varphi$, incidence \(\theta\), at $-90^{\circ}$.`;
+    const markdown = normalizeMarkdownFigureCaptions(
+        '![](images/angles.png)\n\n' + caption
+    );
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const [block] = blocks;
+    const views = createDocumentTranslationViews(markdown, blocks, [{
+        id: block.id,
+        markdown: block.requestMarkdown
+            .replace('Azimuth', '方位角')
+            .replace('incidence', '入射角')
+            .replace('at ', '角度为 '),
+    }], { targetLanguage: 'zh-CN' });
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        resolveImageURL: () => 'blob:mktero-angles',
+    });
+    t.after(() => {
+        editor.destroy();
+        dom.window.close();
+    });
+    const renderedFormulas = selector => [...document.querySelectorAll(
+        selector + ' annotation[encoding="application/x-tex"]'
+    )].map(node => node.textContent);
+    const formulas = ['\\varphi', '\\theta', '-90^{\\circ}'];
+
+    editor.setDocument({
+        markdown: views.translatedMarkdown,
+        figureViews: views.translatedFigureViews,
+        translationView: 'translated',
+    });
+    assert.deepEqual(renderedFormulas('figcaption'), formulas);
+
+    editor.setDocument({
+        markdown: views.comparisonMarkdown,
+        figureViews: views.comparisonFigureViews,
+        translationRanges: views.comparisonTranslationRanges,
+        translationView: 'compare',
+    });
+    assert.deepEqual(renderedFormulas('.cm-mktero-translation-line'), formulas);
+    assert.equal(document.querySelectorAll('.cm-mktero-image img').length, 1);
+    const [{ from, to }] = views.comparisonTranslationRanges;
+    assert.equal(
+        views.comparisonMarkdown.slice(from, to),
+        String.raw`Fig. 1 | \[A\] 方位角 $\varphi$, 入射角 \(\theta\), 角度为 $-90^{\circ}$.`
+    );
 });
 
 test('packs consecutive uncaptioned images and isolated panel letters into one figure', () => {

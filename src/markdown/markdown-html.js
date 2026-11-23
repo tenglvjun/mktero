@@ -760,6 +760,19 @@ function findCaptionMathMatches(source, imageEscapes) {
     }));
 }
 
+// A caption extracted from an image needs ordinary Markdown math escapes.
+// Keep the surrounding caption Markdown escaped so it retains its meaning.
+export function unescapeImageCaptionMath(source) {
+    if (!source.includes('\\\\')) return source;
+    let markdown = '';
+    let offset = 0;
+    for (const match of findCaptionMathMatches(source, true)) {
+        markdown += source.slice(offset, match.start) + match.raw;
+        offset = match.end;
+    }
+    return markdown + source.slice(offset);
+}
+
 function renderCaptionMath(source, mathBudget, target = 'mktero') {
     return renderMath(source, false, mathBudget, target);
 }

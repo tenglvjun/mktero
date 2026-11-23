@@ -94,7 +94,7 @@ The column follows the window width up to the chosen maximum; text, figures, tab
 
 1. Configure and enable AI translation in [Mktero settings](./configuration.md).
 2. Choose `Translate document`. Translation starts only when requested and never rewrites the source Markdown.
-3. Switch between `Original`, `Translation`, and continuous `Bilingual` reading. Partial work can resume block by block.
+3. Switch between `Original`, `Translation`, and continuous `Bilingual` reading. Partial work can resume block by block. Inline formulas in translated figure captions render in both `Translation` and `Bilingual`.
 
 Once a complete translation exists, the `Translation` tab opens the language menu. `Retranslate document` at the end of that menu translates the whole document again in the current language.
 
