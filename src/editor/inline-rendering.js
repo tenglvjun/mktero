@@ -1477,15 +1477,21 @@ export function createInlineRenderingExtension({
 
 export const refreshInlineRendering = StateEffect.define();
 
+const linkDefinitionsByState = new WeakMap();
+
 function findLinkURL(state, position) {
     let node = syntaxTree(state).resolveInner(position, 1);
     while (node && !['Link', 'Autolink', 'URL'].includes(node.name)) {
         node = node.parent;
     }
     if (node?.name === 'URL') return state.sliceDoc(node.from, node.to);
-    const urlNode = node?.getChild('URL');
+    return node ? linkNodeURL(state, node) : '';
+}
+
+function linkNodeURL(state, node) {
+    const urlNode = node.getChild('URL');
     if (urlNode) return state.sliceDoc(urlNode.from, urlNode.to);
-    if (node?.name !== 'Link') return '';
+    if (node.name !== 'Link') return '';
 
     const label = node.getChild('LinkLabel');
     let normalizedLabel = label
@@ -1502,22 +1508,29 @@ function findLinkURL(state, position) {
             );
         }
     }
-    if (!normalizedLabel) return '';
-    let resolvedURL = '';
+    return normalizedLabel ? linkDefinitions(state).get(normalizedLabel) || '' : '';
+}
+
+function linkDefinitions(state) {
+    const cached = linkDefinitionsByState.get(state);
+    if (cached) return cached;
+    const definitions = new Map();
     syntaxTree(state).iterate({
         enter(reference) {
-            if (resolvedURL || reference.name !== 'LinkReference') return;
+            if (reference.name !== 'LinkReference') return;
             const referenceLabel = reference.node.getChild('LinkLabel');
             const referenceURL = reference.node.getChild('URL');
-            if (referenceLabel && referenceURL
-                && normalizeLinkLabel(
-                    state.sliceDoc(referenceLabel.from, referenceLabel.to)
-                ) === normalizedLabel) {
-                resolvedURL = state.sliceDoc(referenceURL.from, referenceURL.to);
+            if (!referenceLabel || !referenceURL) return;
+            const label = normalizeLinkLabel(
+                state.sliceDoc(referenceLabel.from, referenceLabel.to)
+            );
+            if (!definitions.has(label)) {
+                definitions.set(label, state.sliceDoc(referenceURL.from, referenceURL.to));
             }
         },
     });
-    return resolvedURL;
+    linkDefinitionsByState.set(state, definitions);
+    return definitions;
 }
 
 function normalizeLinkLabel(label) {
@@ -1993,6 +2006,7 @@ function decorateCitations(state, decorations, context) {
         const wrapperTo = markup?.wrapperTo ?? citation.to;
         if (rangesOverlapEditing(citation, context)
             || citationRangeIsExcluded(state, citation.from)
+            || citationRangeIsExcluded(state, citation.to - 1)
             || overlapsFootnoteRange(wrapperFrom, wrapperTo, footnoteRanges)
             || overlapsFootnoteRange(
                 citation.from,
@@ -2391,9 +2405,9 @@ function citationRangeIsExcluded(state, position) {
             .includes(node.name)) {
             return true;
         }
-        if (node.name === 'Link') {
-            const source = state.sliceDoc(node.from, node.to);
-            return !isBracketedNumericCitation(source);
+        // Lezer also emits Link nodes for unresolved bare bracket text.
+        if (node.name === 'Link' && linkNodeURL(state, node)) {
+            return true;
         }
         node = node.parent;
     }
@@ -3687,9 +3701,7 @@ function decorateSyntaxNode(node, state, decorations, context) {
     }
 
     if (node.name === 'Link') {
-        const source = state.sliceDoc(node.from, node.to);
-        if (!isBracketedNumericCitation(source)
-            && findLinkURL(state, node.from + 1)) {
+        if (linkNodeURL(state, node.node)) {
             decorateLink(node, state, decorations);
         }
         return;

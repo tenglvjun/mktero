@@ -507,8 +507,6 @@ class MarkdownTabView {
         this.outlineMarkdown = '';
         this.outlineSourceRanges = null;
         this.outlineChromeRanges = [];
-        this.outlineHeadingLevels = 'inferred';
-        this.outlinePdfOutline = [];
         this.renderedChromeRanges = [];
         this.deferredRenderModel = null;
         this.documentSearchOpen = false;
@@ -1056,11 +1054,29 @@ class MarkdownTabView {
                     this.analysisCache,
                     markdown
                 );
+                const sourceHeadings = computeAlignedMarkdownOutline(
+                    this.analysisCache,
+                    model.markdown || '',
+                    {
+                        chromeRanges: sourceChromeRanges,
+                        pdfOutline: model.pdfOutline,
+                        sourceMap: model.sourceMap,
+                        itemTitle: model.title,
+                        headingLevels: outlineHeadingLevels(model.documentStructure),
+                    }
+                );
+                const headings = translatedView
+                    ? projectTranslatedOutline(
+                        sourceHeadings,
+                        computeAlignedMarkdownOutline(this.analysisCache, markdown),
+                        model.translationBlockRanges,
+                        translationLanguage
+                    )
+                    : sourceHeadings;
                 this.syncOutline(
                     comparisonView ? model.markdown || '' : markdown,
                     comparisonView ? model.comparisonSourceRanges : null,
                     translatedView ? NO_OUTLINE_RANGES : sourceChromeRanges,
-                    translatedView && !comparisonView ? NO_OUTLINE_RANGES : model.pdfOutline,
                     comparisonView
                         ? computeDocumentFigures(
                             this.analysisCache,
@@ -1068,12 +1084,7 @@ class MarkdownTabView {
                             { figureMap: model.figureMap }
                         )
                         : figureViews,
-                    translatedView ? '' : model.title,
-                    // A translation keeps the source headings but not their
-                    // producer's leveling guarantees.
-                    !translatedView || comparisonView
-                        ? outlineHeadingLevels(model.documentStructure)
-                        : 'inferred'
+                    headings
                 );
                 this.syncNotes(annotationOverlay, markdown.length);
                 if (assetsChanged) this.editor.refreshRendering();
@@ -7518,20 +7529,13 @@ class MarkdownTabView {
         markdown,
         sourceRanges = null,
         chromeRanges = NO_OUTLINE_RANGES,
-        pdfOutline = NO_OUTLINE_RANGES,
         figureViews = null,
-        itemTitle = '',
-        headingLevels = 'inferred'
+        headings = NO_OUTLINE_RANGES
     ) {
         const nextMarkdown = String(markdown || '');
-        const nextHeadingLevels = headingLevels === 'structural' ? 'structural' : 'inferred';
         const nextChromeRanges = Array.isArray(chromeRanges)
             ? chromeRanges
             : NO_OUTLINE_RANGES;
-        const nextPdfOutline = Array.isArray(pdfOutline)
-            ? pdfOutline
-            : NO_OUTLINE_RANGES;
-        const nextItemTitle = String(itemTitle || '');
         // The outline is derived purely from these inputs. A republished
         // document that moves none of them must not rebuild the list, which
         // costs a full heading extraction plus one list item per heading.
@@ -7539,17 +7543,13 @@ class MarkdownTabView {
             && this.outlineMarkdown === nextMarkdown
             && this.outlineSourceRanges === sourceRanges
             && this.outlineChromeRanges === nextChromeRanges
-            && this.outlinePdfOutline === nextPdfOutline
             && this.outlineFigureViews === figureViews
-            && this.outlineItemTitle === nextItemTitle
-            && this.outlineHeadingLevels === nextHeadingLevels;
+            && this.outlineHeadings === headings;
         this.outlineMarkdown = nextMarkdown;
-        this.outlineHeadingLevels = nextHeadingLevels;
         this.outlineSourceRanges = sourceRanges;
         this.outlineChromeRanges = nextChromeRanges;
-        this.outlinePdfOutline = nextPdfOutline;
         this.outlineFigureViews = figureViews;
-        this.outlineItemTitle = nextItemTitle;
+        this.outlineHeadings = headings;
         if (!unchanged) this.landmarkItems = null;
         if (unchanged) return;
         this.renderOutlineList();
@@ -7613,16 +7613,7 @@ class MarkdownTabView {
     }
 
     outlineHeadingItems() {
-        return computeAlignedMarkdownOutline(
-            this.analysisCache,
-            this.outlineMarkdown,
-            {
-                chromeRanges: this.outlineChromeRanges,
-                pdfOutline: this.outlinePdfOutline,
-                itemTitle: this.outlineItemTitle,
-                headingLevels: this.outlineHeadingLevels,
-            }
-        ).map(heading => ({
+        return this.outlineHeadings.map(heading => ({
             text: heading.text,
             offset: mapSourceOffsetToComparison(
                 heading.offset,
@@ -8731,6 +8722,34 @@ function findActiveNavigationItem(elements, offset) {
     return active;
 }
 
+function projectTranslatedOutline(sourceHeadings, translatedHeadings, blocks, language) {
+    if (!Array.isArray(blocks) || !blocks.length) return translatedHeadings;
+    return sourceHeadings.flatMap(heading => {
+        const range = mapSourceRangeToTranslation({
+            from: heading.offset, to: heading.offset + 1,
+        }, blocks);
+        if (!range) return [];
+        const matches = translatedHeadings.filter(candidate => (
+            candidate.offset >= range.from && candidate.offset < range.to
+        ));
+        const translated = matches.length === 1 ? matches[0] : null;
+        return [{
+            level: heading.level,
+            offset: translated?.offset ?? range.from,
+            text: translated?.text ?? translatedOutlineLabel(heading, language),
+        }];
+    });
+}
+
+function translatedOutlineLabel(heading, language) {
+    if (!heading.recovered || language !== 'zh-CN') return heading.text;
+    // A recovered section may have no translated title in a pre-existing cache.
+    const match = /^((?:\d+(?:\.\d+)*\.?\s+)?)Introduction$/iu.exec(heading.text);
+    if (!match) return heading.text;
+    const { t } = createLocalization({ zoteroLocale: language });
+    return match[1] + t('viewer.outlineIntroduction');
+}
+
 function mapSourceOffsetToComparison(offset, sourceRanges) {
     if (!Array.isArray(sourceRanges)) return offset;
     const range = sourceRanges.find(candidate => (
@@ -8758,6 +8777,7 @@ function collectDocumentLayerInputs(
     return [
         model.renderMode,
         markdown,
+        model.markdown,
         translatedView,
         comparisonView,
         model.figureMap,

@@ -86,7 +86,9 @@ Missing references with a reliable DOI, arXiv ID, or PMID use Zotero's native tr
 
 Numbered references can continue across multiple References sections. Citations in the main text and intervening sections such as Methods can link to either part. An explicitly labeled appendix or supplement that restarts numbering resolves its citations within that section.
 
-Grouped author-year citations resolve every matched bibliography entry, including ACM/natbib square-bracket forms such as `Lewis et al. [2020]` and `[Kirkpatrick et al., 2017; Wei et al., 2026]`. If conversion inserts a stray heading inside an APA-style bibliography, the reference list continues only when multiple bibliography-shaped entries clearly resume after it. A genuine author note still ends the list.
+The reader highlights matched author-year citations, including ACM/natbib square-bracket forms such as `Lewis et al. [2020]`. In a group such as `[Kirkpatrick et al., 2017, Wei et al., 2026]`, the popup lists each matched work. Commas and semicolons can separate works, and a year suffix such as `2025b` links to the corresponding entry.
+
+If conversion inserts a stray heading inside an APA-style bibliography, the reference list continues only when multiple bibliography-shaped entries clearly resume after it. A genuine author note still ends the list.
 
 ### Snapshot attachments
 

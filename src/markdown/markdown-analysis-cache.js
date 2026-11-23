@@ -244,6 +244,7 @@ export function headingLevelsForDocumentStructure(documentStructure) {
 export function computeAlignedMarkdownOutline(cache, markdown, {
     chromeRanges = NO_DEPENDENCY_RANGES,
     pdfOutline = NO_DEPENDENCY_RANGES,
+    sourceMap = NO_DEPENDENCY_RANGES,
     itemTitle = '',
     headingLevels = 'inferred',
 } = {}) {
@@ -251,13 +252,13 @@ export function computeAlignedMarkdownOutline(cache, markdown, {
         cache,
         NAMESPACE_OUTLINE,
         markdown,
-        [chromeRanges, pdfOutline, itemTitle, headingLevels],
+        [chromeRanges, pdfOutline, sourceMap, itemTitle, headingLevels],
         () => extractAlignedMarkdownOutline(
             markdown,
             chromeRanges,
             pdfOutline,
             itemTitle,
-            { headingLevels }
+            { headingLevels, sourceMap }
         )
     );
 }

@@ -23,6 +23,10 @@ const MIN_RESUMED_UNNUMBERED_REFERENCES = 3;
 const MAX_RESUMED_REFERENCE_PARAGRAPHS = 6;
 const MAX_REFERENCE_PREFIX_LENGTH = 1_024;
 const YEAR_PATTERN = /(?:^|[^\d])((?:18|19|20)\d{2}[a-z]?)(?=$|[^\d])/i;
+const CITATION_YEAR_SOURCE = String.raw`(?:18|19|20)\d{2}[a-z]?(?![\p{L}\p{N}])`;
+const FIRST_CITATION_YEAR = new RegExp(String.raw`(?<![\p{L}\p{N}])${CITATION_YEAR_SOURCE}`, 'iu');
+const CITATION_YEAR_AT_START = new RegExp(String.raw`^\s*(${CITATION_YEAR_SOURCE})`, 'iu');
+const NEXT_CITATION_YEAR = new RegExp(String.raw`^\s*[,，]\s*(${CITATION_YEAR_SOURCE})`, 'iu');
 const UNICODE_SUPERSCRIPT_PATTERN = /[⁰¹²³⁴⁵⁶⁷⁸⁹]+(?:\s*(?:[,;，；]\s*[⁰¹²³⁴⁵⁶⁷⁸⁹]+|[-–—⁻]\s*[⁰¹²³⁴⁵⁶⁷⁸⁹]+))*/g;
 const WRAPPED_SUPERSCRIPT_PATTERNS = [
     /<sup(?:\s[^>]*)?>([^<>\r\n]{1,80})<\/sup\s*>/gi,
@@ -1300,13 +1304,11 @@ function findAuthorYearCitations(markdown, bodyFrom, bodyEnd, referencesByYear) 
         for (const match of body.matchAll(pattern)) {
             if (skip(body, match)) continue;
             const matched = [];
-            for (const segment of match[1].split(/[;；]/)) {
-                const authorYear = parseAuthorYearSegment(segment);
-                if (!authorYear) continue;
-                for (const year of authorYear.years) {
+            for (const { authors, years } of parseAuthorYearEntries(match[1])) {
+                for (const year of years) {
                     matched.push(...matchAuthorReferences(
                         referencesByYear,
-                        authorYear.authors,
+                        authors,
                         year
                     ));
                 }
@@ -1329,7 +1331,7 @@ function findAuthorYearCitations(markdown, bodyFrom, bodyEnd, referencesByYear) 
     for (const pattern of narrativePatterns) {
         for (const match of body.matchAll(pattern)) {
             if (squareBracketNarrativeLooksLikeMarkup(body, match)) continue;
-            const years = parseYearSequence(match[3]);
+            const { years } = parseYearSequence(match[3]);
             const matched = uniqueReferences(years.flatMap(year => (
                 matchAuthorReferences(referencesByYear, match[2], year)
             )));
@@ -1357,32 +1359,36 @@ function squareBracketNarrativeLooksLikeMarkup(body, match) {
     return ['(', '[', ':'].includes(after);
 }
 
-function parseAuthorYearSegment(segment) {
-    const value = segment.trim();
-    const firstYear = /(?:18|19|20)\d{2}[a-z]?/i.exec(value);
-    if (!firstYear) return null;
-    const authors = value
-        .slice(0, firstYear.index)
-        .replace(/[\s,，]+$/u, '')
-        .trim();
-    if (!/\p{L}/u.test(authors)) return null;
-    const years = parseYearSequence(value.slice(firstYear.index));
-    return years.length ? { authors, years } : null;
+function* parseAuthorYearEntries(value) {
+    for (const segment of value.split(/[;；]/)) {
+        let remaining = segment;
+        let firstYear;
+        while ((firstYear = FIRST_CITATION_YEAR.exec(remaining))) {
+            const authors = remaining.slice(0, firstYear.index)
+                .replace(/[\s,，]+$/u, '')
+                .trim();
+            if (!/\p{L}/u.test(authors)) break;
+            const { years, rest } = parseYearSequence(remaining.slice(firstYear.index));
+            yield { authors, years };
+            // After consecutive years for one author group, a comma can start
+            // a new group. Commas before the first year belong to the authors.
+            const separator = /^\s*[,，]/u.exec(rest);
+            if (!separator) break;
+            remaining = rest.slice(separator[0].length);
+        }
+    }
 }
 
 function parseYearSequence(value) {
     const years = [];
-    let remaining = String(value);
-    let match = /^\s*((?:18|19|20)\d{2}[a-z]?)/i.exec(remaining);
-    if (!match) return years;
-    years.push(match[1].toLowerCase());
-    remaining = remaining.slice(match[0].length);
-
-    while ((match = /^\s*[,，]\s*((?:18|19|20)\d{2}[a-z]?)/i.exec(remaining))) {
+    let rest = value;
+    let match = CITATION_YEAR_AT_START.exec(rest);
+    while (match) {
         years.push(match[1].toLowerCase());
-        remaining = remaining.slice(match[0].length);
+        rest = rest.slice(match[0].length);
+        match = NEXT_CITATION_YEAR.exec(rest);
     }
-    return years;
+    return { years, rest };
 }
 
 function groupReferencesByYear(references) {

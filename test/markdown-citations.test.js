@@ -1989,6 +1989,50 @@ test('matches ACM natbib square-bracket author-year citations', () => {
     );
 });
 
+test('matches comma-separated authors and consecutive years in the same citation', () => {
+    const bracketed = '[Smith, 2020, 2021, Jones, Lee, and Ruiz, 2022，\n'
+        + 'Díaz, 2023b; Clark and Chalmers, 1998]';
+    const parenthetical = '(Smith, 2020, Unknown, 2022, Díaz, 2023b)';
+    const markdown = [
+        `See ${bracketed} and ${parenthetical}.`,
+        '',
+        '## References',
+        '',
+        'Smith, A. (2020). First study.',
+        '',
+        'Smith, A. (2021). Second study.',
+        '',
+        'Jones, B., Lee, C., & Ruiz, D. (2022). Joint study.',
+        '',
+        'Díaz, R. (2023a). Another study.',
+        '',
+        'Díaz, R. (2023b). Final study.',
+        '',
+        'Clark, A., & Chalmers, D. (1998). The extended mind.',
+    ].join('\n');
+    const { citations } = analyzeMarkdownCitations(markdown);
+
+    assert.deepEqual(
+        citations.map(({ from, to, references }) => [
+            markdown.slice(from, to),
+            references.map(reference => reference.text),
+        ]),
+        [
+            [bracketed, [
+                'Smith, A. (2020). First study.',
+                'Smith, A. (2021). Second study.',
+                'Jones, B., Lee, C., & Ruiz, D. (2022). Joint study.',
+                'Díaz, R. (2023b). Final study.',
+                'Clark, A., & Chalmers, D. (1998). The extended mind.',
+            ]],
+            [parenthetical, [
+                'Smith, A. (2020). First study.',
+                'Díaz, R. (2023b). Final study.',
+            ]],
+        ]
+    );
+});
+
 test('ignores markdown links when matching square-bracket author-year citations', () => {
     const markdown = [
         '# Paper',

@@ -337,7 +337,7 @@ export function validatePDFTextIndex(index) {
             throw new Error('PDF text index exceeds the safety limit');
         }
         for (const item of page.items) validateTextItem(item, page.rawText);
-        if ((index.profile.endsWith('|text-v12') && !Array.isArray(page.links))
+        if ((/\|text-v1[23]$/.test(index.profile) && !Array.isArray(page.links))
             || page.links !== undefined && (!Array.isArray(page.links)
                 || page.links.length > PDF_LINK_ANNOTATION_LIMITS.maxLinksPerPage
                 || !page.links.every(validatePDFLink))) {
@@ -345,7 +345,7 @@ export function validatePDFTextIndex(index) {
         }
         for (const style of Object.values(page.styles)) validateStyle(style);
     }
-    validatePdfOutline(index.outline);
+    validatePdfOutline(index.outline, index.pages.length);
     return index;
 }
 
