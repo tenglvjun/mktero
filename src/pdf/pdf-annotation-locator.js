@@ -7,7 +7,7 @@ import {
     normalizePdfAnnotationText,
 } from '../markdown/pdf-annotation-text.js';
 import { createPDFCaptionExclusions } from './pdf-caption-evidence.js';
-import { findTextOccurrences } from '../markdown/text-normalization.js';
+import { createNormalizedTextIndex, findTextOccurrences } from '../markdown/text-normalization.js';
 import {
     createPDFPageBodyViews,
     createPDFPageReadingViews,
@@ -59,6 +59,8 @@ const MISENCODED_PLUS_MINUS = /§(?=\d)/gu;
 const PLUS_MINUS_NUMBER = /±(?=\d)/u;
 const MISENCODED_MAPSTO = /\s*7\s*→/gu;
 const MAPSTO_TEXT = /↦/u;
+const HAN_PAIR = /\p{Script=Han} ?\p{Script=Han}/u;
+const HAN_SPACING = /(?<=\p{Script=Han}) (?=\p{Script=Han})/gu;
 
 export class PDFAnnotationLocator {
     constructor({
@@ -381,7 +383,8 @@ function locateInIndex(index, text, {
         : [{ pages, hint: pdfPageIndexHint }, { pages: index.pages, hint: undefined }];
     let located = null;
     for (const attempt of attempts) {
-        located = findMatchWithTextStrategies(attempt.pages, target, quote);
+        located = findHanSpacingMatch(attempt.pages, target, quote)
+            || findMatchWithTextStrategies(attempt.pages, target, quote);
         if (!located) {
             located = findCrossPageMatch(
                 index.pages,
@@ -525,6 +528,49 @@ function locateInIndex(index, text, {
             pageIndex: match.page.pageIndex,
             rects,
         },
+    };
+}
+
+function foldHanSpacing(text) {
+    return text.replace(HAN_SPACING, '');
+}
+
+function createHanSpacingSourceIndex(rawText) {
+    const normalized = createDehyphenatedPdfAnnotationTextIndex(rawText);
+    const omitted = new Set(Array.from(normalized.text.matchAll(HAN_SPACING), match => match.index));
+    if (!omitted.size) return normalized;
+    const folded = createNormalizedTextIndex(
+        normalized.text,
+        undefined,
+        (character, offset) => omitted.has(offset) ? '' : character
+    );
+    return {
+        text: folded.text,
+        sourceRange(from, length) {
+            const range = folded.sourceRange(from, length);
+            return normalized.sourceRange(range.from, range.to - range.from);
+        },
+    };
+}
+
+function findHanSpacingMatch(pages, target, textQuote) {
+    if (!HAN_PAIR.test(target)) return null;
+    const foldedTarget = foldHanSpacing(target);
+    // Search literal and wrapped occurrences together so an unwrapped copy
+    // cannot hide a second match on the same page.
+    const match = findUniqueIndexMatch(
+        pages,
+        foldedTarget,
+        page => foldHanSpacing(page.normalizedText),
+        mapTextQuote(textQuote, value => (
+            foldHanSpacing(createDehyphenatedPdfAnnotationTextIndex(value).text.trim())
+        ))
+    );
+    if (!match) return null;
+    const sourceIndex = createHanSpacingSourceIndex(match.page.rawText);
+    return {
+        match,
+        sourceRange: sourceIndex.sourceRange(match.normalizedFrom, foldedTarget.length),
     };
 }
 
@@ -1561,17 +1607,26 @@ function locateTextQuoteInIndex(index, text, {
         candidate.pageIndex === pdfPageIndexHint
     ));
     if (!page) return null;
-    for (const strategy of basicTextMatchStrategies()) {
+    const strategies = basicTextMatchStrategies();
+    if (HAN_PAIR.test(target)) {
+        strategies.push({
+            target: foldHanSpacing(target),
+            createSourceIndex: createHanSpacingSourceIndex,
+            normalizedTextForPage: page => foldHanSpacing(page.normalizedText),
+        });
+    }
+    for (const strategy of strategies) {
+        const matchTarget = strategy.target ?? target;
         const normalizedText = strategy.normalizedTextForPage(page);
         const occurrences = findTextOccurrences(
             normalizedText,
-            target,
+            matchTarget,
             MAX_MATCHES
         );
         if (occurrences.truncated) return null;
         const sourceIndex = strategy.createSourceIndex(page.rawText);
         const matchingOffsets = occurrences.offsets.filter(normalizedFrom => (
-            sourceIndex.sourceRange(normalizedFrom, target.length).from
+            sourceIndex.sourceRange(normalizedFrom, matchTarget.length).from
                 === sourceOffset
         ));
         if (matchingOffsets.length !== 1) continue;
@@ -1585,7 +1640,7 @@ function locateTextQuoteInIndex(index, text, {
             suffix: leadingCodePoints(
                 normalizedText,
                 MAX_PDF_ANNOTATION_TEXT_QUOTE_CONTEXT_CODE_POINTS,
-                normalizedFrom + target.length
+                normalizedFrom + matchTarget.length
             ),
         });
     }

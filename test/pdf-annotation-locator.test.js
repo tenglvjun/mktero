@@ -1575,6 +1575,79 @@ test('does not invent spaces inside contiguous or CJK TextItems', async () => {
     locator.dispose();
 });
 
+test('locates a Chinese selection across a PDF line break and preserves glyph bounds', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('前 文 𠮷中', { x: 72, y: 700, hasEOL: true }),
+        createTextItem('文 测试 后文', { x: 72, y: 680 }),
+    ]]);
+
+    try {
+        const result = await locator.locate(42, '𠮷中文测试', { pdfPageIndexHint: 0 });
+        assert.equal(result.text, '𠮷中文测试');
+        assert.equal(result.position.rects.length, 2);
+        assertRectCloseTo(result.position.rects[0], [112, 697.6, 132, 709.6]);
+        assertRectCloseTo(result.position.rects[1], [72, 677.6, 112, 689.6]);
+    }
+    finally {
+        locator.dispose();
+    }
+});
+
+test('uses the page and context for Chinese selections with and without PDF line breaks', async () => {
+    const locator = await createSyntheticLocator([
+        [createTextItem('这是对照段落中文标注测试结束')],
+        [
+            createTextItem('这是示例段落中文标', { y: 700, hasEOL: true }),
+            createTextItem('注测试结束', { y: 680, hasEOL: true }),
+            createTextItem('这是对照段落中文标注测试结束', { y: 660 }),
+        ],
+    ]);
+    const text = '中文标注测试';
+
+    try {
+        await assert.rejects(
+            locator.locate(42, text, { pdfPageIndexHint: 1 }),
+            { code: 'MKTERO_PDF_TEXT_AMBIGUOUS' }
+        );
+        const result = await locator.locate(42, text, {
+            pdfPageIndexHint: 1,
+            textQuote: { prefix: '这是示例段落', suffix: '结束' },
+        });
+        assert.equal(result.position.pageIndex, 1);
+        assert.equal(result.position.rects.length, 2);
+        assertRectCloseTo(result.position.rects[0], [132, 697.6, 162, 709.6]);
+        const quote = await locator.locateTextQuote(42, text, {
+            pdfPageIndexHint: 1,
+            sortIndex: result.sortIndex,
+        });
+        assert.equal(quote?.prefix, '这是示例段落');
+        assert.ok(quote.suffix.startsWith('结束'));
+    }
+    finally {
+        locator.dispose();
+    }
+});
+
+test('preserves punctuation and Latin word boundaries when matching Chinese PDF text', async () => {
+    const locator = await createSyntheticLocator([[
+        createTextItem('中文标', { y: 700, hasEOL: true }),
+        createTextItem('注测试A B。', { y: 680 }),
+    ]]);
+
+    try {
+        const result = await locator.locate(42, '中文标注测试A B。');
+        assert.equal(result.position.rects.length, 2);
+        for (const text of ['中文标注测试AB。', '中文标注测试A B？']) {
+            await assert.rejects(locator.locate(42, text), {
+                code: 'MKTERO_PDF_TEXT_NOT_FOUND',
+            });
+        }
+    }
+    finally {
+        locator.dispose();
+    }
+});
+
 test('rejects untrusted non-finite PDF.js TextItem geometry', async () => {
     await assert.rejects(
         createSyntheticLocator([[

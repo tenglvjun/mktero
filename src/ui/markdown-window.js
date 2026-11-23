@@ -1161,12 +1161,6 @@ class MarkdownTabView {
         this.clearDocumentActionStatus();
         this.clearWarningToast();
         this.clearCorrectionUndo();
-        if (this.sourcePeekTimer != null) {
-            this.ownerWindow.clearTimeout?.(this.sourcePeekTimer);
-        }
-        this.sourcePeekTimer = null;
-        this.sourcePeekMicrotask = false;
-        this.sourcePeekGeneration += 1;
         this.hideSourcePeek();
         try {
             this.model.onDisposeSourcePeek?.();
@@ -7987,7 +7981,7 @@ class MarkdownTabView {
     }
 
     async syncSourcePeek() {
-        if (this.destroyed) return;
+        if (this.destroyed || !this.readerSourcePeek) return;
         const peek = this.model.status === 'ready'
             && this.model.renderMode !== 'html'
             && typeof this.model.onRenderSourcePeek === 'function'
@@ -8051,6 +8045,11 @@ class MarkdownTabView {
     }
 
     hideSourcePeek() {
+        if (this.sourcePeekTimer != null) {
+            this.ownerWindow.clearTimeout?.(this.sourcePeekTimer);
+            this.sourcePeekTimer = null;
+        }
+        this.sourcePeekGeneration += 1;
         this.sourcePeekKey = '';
         this.sourcePeekLocation = null;
         if (!this.elements?.sourcePeek) return;
