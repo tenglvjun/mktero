@@ -2,6 +2,7 @@ import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
     findDisplayMathMatches,
     findInlineMathMatches,
+    unescapeImageCaptionMath,
 } from './markdown-html.js';
 import { analyzeMarkdownCitations } from './markdown-citations.js';
 import {
@@ -1345,7 +1346,9 @@ function removeRepeatedComparisonImages(markdown, block, ranges) {
                 imageEdits.push({
                     from: node.from,
                     to: node.to,
-                    text: value.slice(altRange.from, altRange.to),
+                    text: unescapeImageCaptionMath(
+                        value.slice(altRange.from, altRange.to)
+                    ),
                 });
             }
             return false;
