@@ -7175,16 +7175,92 @@ test('aligns the Markdown outline to unique PDF bookmarks', () => {
     const buttons = [...shadow.querySelectorAll('.markdown-outline-link')];
 
     assert.deepEqual(buttons.map(button => button.textContent), [
+        'Discussion',
         'Introduction',
         'Methods',
         'Results',
     ]);
     assert.deepEqual(buttons.map(button => button.getAttribute('data-level')), [
         '1',
+        '1',
         '2',
         '1',
     ]);
     view.destroy();
+});
+
+test('uses one outline in all reading views and projects recovered heading jumps', () => {
+    const markdown = [
+        '# Paper', '', '## Abstract', '', 'Summary text.', '',
+        '## Contents', '', '1 Introduction 4', '',
+        'Section begins here.', '', '## 2 Methods', '', 'Methods text.',
+    ].join('\n');
+    const localized = new Map([
+        ['# Paper', '# 论文'],
+        ['## Abstract', '## 摘要'],
+        ['Summary text.', '摘要正文。'],
+        ['## Contents', '## 目录'],
+        ['Section begins here.', '本节从此处开始。'],
+        ['## 2 Methods', '## 2 方法'],
+        ['Methods text.', '方法正文。'],
+    ]);
+    const blocks = collectMarkdownTranslationBlocks(markdown);
+    const translations = blocks.filter(block => block.translatable).map(block => ({
+        id: block.id, markdown: localized.get(block.markdown) || block.markdown,
+    }));
+    const views = createDocumentTranslationViews(markdown, blocks, translations, {
+        targetLanguage: 'zh-CN',
+    });
+    const sourceOffset = markdown.indexOf('Section begins');
+    const model = createModel({
+        status: 'ready', progress: 100, markdown, sourceKind: 'markdown',
+        documentStructure: 'mineru-ir-v1',
+        translationStatus: 'ready', translationTargetLanguage: 'zh-CN',
+        translationBlocks: translations,
+        translationBlockRanges: views.blockRanges,
+        translatedMarkdown: views.translatedMarkdown,
+        comparisonMarkdown: views.comparisonMarkdown,
+        comparisonSourceRanges: views.comparisonSourceRanges,
+        comparisonTranslationRanges: views.comparisonTranslationRanges,
+        pdfOutline: [{
+            title: 'Introduction', items: [],
+            heading: { text: '1 Introduction', pageIndex: 3, bbox: [100, 95, 320, 115] },
+        }],
+        sourceMap: [{
+            type: 'text', markdownFrom: sourceOffset,
+            markdownTo: sourceOffset + 'Section begins here.'.length,
+            locations: [{ pageIndex: 3, bbox: [105, 140, 700, 170] }],
+        }],
+    });
+    const jumps = [];
+    const { view, shadow } = createView(model, {}, {
+        editorFactory(options) {
+            const editor = createTestInlineEditor(options);
+            editor.scrollToOffset = offset => jumps.push(offset);
+            return editor;
+        },
+    });
+    try {
+        const sourceLabels = ['Paper', 'Abstract', 'Contents', '1 Introduction', '2 Methods'];
+        const modes = [
+            ['original', sourceLabels, sourceOffset],
+            ['translated', ['论文', '摘要', '目录', '1 引言', '2 方法'],
+                views.translatedMarkdown.indexOf('本节从此处开始。')],
+            ['compare', sourceLabels, views.comparisonMarkdown.indexOf('Section begins here.')],
+        ];
+        for (const [mode, labels, offset] of modes) {
+            view.render({ ...model, translationView: mode });
+            const buttons = [...shadow.querySelectorAll('.markdown-outline-link')];
+            assert.deepEqual(buttons.map(button => button.textContent), labels);
+            assert.deepEqual(buttons.map(button => button.dataset.level), ['1', '2', '2', '1', '2']);
+            assert.ok(offset >= 0);
+            buttons[3].click();
+            assert.equal(jumps.at(-1), offset);
+        }
+    }
+    finally {
+        view.destroy();
+    }
 });
 
 test('switches the outline between headings and captioned figures', () => {

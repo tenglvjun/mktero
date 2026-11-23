@@ -9,6 +9,7 @@ Adjacent inline formulas in algorithm steps render separately, preserving their 
 ## Move around the document
 
 - Use `Headings` in the left column for the outline, or `Figures` for the figure/table index.
+- The original, translated, and bilingual views share the section hierarchy. PDF bookmarks refine the levels of matching headings. When a heading is missing from the conversion, Mktero can restore an outline entry if the PDF text and source map identify its location. The entry jumps to the first mapped content of that section. If a translated label is unavailable, the outline can display the printed title.
 - Open previews of citations, author affiliations, figures, and tables without leaving the reader.
 - Press `Cmd/Ctrl+F` to find text in the body.
 - Watch the thin progress bar at the bottom of the reading pane. It appears when the document is long enough to scroll and is hidden in focus mode.

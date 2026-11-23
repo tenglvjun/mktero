@@ -390,7 +390,7 @@ test('keeps the Markdown outline when the PDF has no bookmarks', () => {
     );
 });
 
-test('uses unique PDF bookmarks to order and indent the Markdown outline', () => {
+test('uses PDF bookmark levels while retaining headings in Markdown order', () => {
     const markdown = [
         '# Discussion',
         '',
@@ -411,11 +411,50 @@ test('uses unique PDF bookmarks to order and indent the Markdown outline', () =>
         extractAlignedMarkdownOutline(markdown, [], pdfOutline)
             .map(heading => [heading.text, heading.level]),
         [
+            ['Discussion', 1],
             ['Introduction', 1],
             ['Methods', 2],
             ['Results', 1],
         ]
     );
+});
+
+test('recovers a printed heading only at a supported source-map location', () => {
+    const markdown = [
+        '# Paper', '', '## Contents', '', '1 Introduction 4',
+        '', 'Section begins here.', '', '## 2 Methods',
+    ].join('\n');
+    const offset = markdown.indexOf('Section begins');
+    const heading = { text: '1 Introduction', pageIndex: 3, bbox: [100, 95, 320, 115] };
+    const bookmark = { title: 'Introduction', heading, items: [] };
+    const pdfOutline = [bookmark, { title: 'Methods', items: [] }];
+    const sourceMap = [
+        { markdownFrom: markdown.indexOf('1 Introduction'), locations: [
+            { pageIndex: 1, bbox: [100, 120, 400, 140] },
+        ] },
+        { markdownFrom: offset, locations: [
+            { pageIndex: 3, bbox: [105, 140, 700, 170] },
+        ] },
+    ];
+    const options = { sourceMap, headingLevels: 'structural' };
+    const result = extractAlignedMarkdownOutline(markdown, [], pdfOutline, '', options);
+    assert.deepEqual(result.map(item => item.text), ['Paper', 'Contents', '1 Introduction', '2 Methods']);
+    assert.deepEqual(result[2], { text: '1 Introduction', offset, level: 1, recovered: true });
+
+    for (const [outline, testOptions] of [
+        [[{ title: 'Introduction', items: [] }], options],
+        [[bookmark, bookmark], options],
+        [pdfOutline, { ...options, sourceMap: sourceMap.slice(0, 1) }],
+        [pdfOutline, { ...options, sourceMap: [
+            ...sourceMap, { ...sourceMap[1], markdownFrom: offset + 1 },
+        ] }],
+    ]) {
+        assert.equal(
+            extractAlignedMarkdownOutline(markdown, [], outline, '', testOptions)
+                .some(item => item.recovered),
+            false
+        );
+    }
 });
 
 test('does not guess when a PDF bookmark matches more than one heading', () => {

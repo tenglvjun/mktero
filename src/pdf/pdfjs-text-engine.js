@@ -10,7 +10,7 @@ import {
 import {
     createDehyphenatedPdfAnnotationTextIndex,
 } from '../markdown/pdf-annotation-text.js';
-import { normalizePdfOutline } from './pdf-outline.js';
+import { readPdfOutline } from './pdf-outline.js';
 import { normalizePDFLinkAnnotations } from './pdf-link-annotations.js';
 import {
     isLikelyNumericSuperscriptExponent,
@@ -23,10 +23,8 @@ const MAX_PAGE_TEXT_LENGTH = 1_000_000;
 const MAX_TOTAL_TEXT_LENGTH = 10_000_000;
 const MAX_TEXT_ITEMS = 250_000;
 
-// text-v12 adds normalized, safe external Link annotations to the index.
-// The text portion still folds math accents, numeric exponents, and relation
-// spacing; older indexes therefore cannot provide link matches safely.
-export const PDF_TEXT_INDEX_PROFILE = `pdfjs-${PDFJS_VERSION}|text-v12`;
+// text-v13 records printed headings verified at PDF bookmark destinations.
+export const PDF_TEXT_INDEX_PROFILE = `pdfjs-${PDFJS_VERSION}|text-v13`;
 
 // Zotero's DOM-free plugin sandbox cannot dynamically import the packaged
 // worker URL when PDF.js falls back to its in-process worker implementation.
@@ -197,11 +195,12 @@ export function createPDFJSTextEngine({
                 }
                 let outline = [];
                 try {
-                    outline = normalizePdfOutline(await document.getOutline?.());
+                    outline = await readPdfOutline(document, pages, { signal });
                 }
                 catch {
                     outline = [];
                 }
+                throwIfAborted(signal);
                 return {
                     profile: PDF_TEXT_INDEX_PROFILE,
                     linkAnnotationsComplete,

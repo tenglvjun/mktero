@@ -145,7 +145,7 @@ export function pdfLines(items) {
 // vertical center, or null when the PDF page does not have the MinerU
 // page's shape. Computed once per PDF page and MinerU page size.
 const pageItemsCache = new WeakMap();
-function pdfPageItems(pdfPage, irPage) {
+export function pdfPageItems(pdfPage, irPage) {
     if (!pdfPage || typeof pdfPage !== 'object') return null;
     const key = `${irPage.width}x${irPage.height}`;
     const cached = pageItemsCache.get(pdfPage);

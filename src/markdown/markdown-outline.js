@@ -79,30 +79,103 @@ export function extractAlignedMarkdownOutline(
     const bookmarks = flattenPdfOutline(pdfOutline);
     if (!bookmarks.length) return headings;
 
-    const used = new Set();
-    const matched = [];
-    for (const bookmark of bookmarks) {
-        const key = outlineMatchKey(bookmark.title);
-        if (!key) continue;
-        const indexes = [];
-        for (const [index, heading] of headings.entries()) {
-            if (used.has(index)) continue;
-            if (outlineMatchKey(heading.text) === key) indexes.push(index);
-        }
-        if (indexes.length !== 1) continue;
-        const index = indexes[0];
-        used.add(index);
-        matched.push({
-            ...headings[index],
-            level: bookmark.level,
-        });
-    }
+    const headingsByKey = uniqueOutlineItems(headings, 'text');
+    const bookmarksByKey = uniqueOutlineItems(bookmarks, 'title');
+    const levels = new Map();
+    const matched = bookmarks.map(bookmark => {
+        const key = outlineHeadingMatchKey(bookmark.title);
+        const heading = headingsByKey.get(key);
+        if (!heading || bookmarksByKey.get(key) !== bookmark) return null;
+        levels.set(heading.offset, bookmark.level);
+        return heading;
+    });
+    const useBookmarkLevels = levels.size >= MIN_PDF_OUTLINE_MATCHES
+        && levels.size * 2 >= bookmarks.length;
+    const recovered = recoverOutlineHeadings(
+        bookmarks,
+        bookmarksByKey,
+        headings,
+        matched,
+        options.sourceMap,
+        chromeRanges,
+        String(markdown || '')
+    );
+    return [
+        ...headings.map(heading => {
+            const level = useBookmarkLevels && levels.get(heading.offset);
+            return level ? { ...heading, level } : heading;
+        }),
+        ...recovered,
+    ].sort((left, right) => left.offset - right.offset);
+}
 
-    if (matched.length < MIN_PDF_OUTLINE_MATCHES
-        || matched.length * 2 < bookmarks.length) {
-        return headings;
+function uniqueOutlineItems(items, field) {
+    const byKey = new Map();
+    for (const item of items) {
+        const key = outlineHeadingMatchKey(item[field]);
+        if (key) byKey.set(key, byKey.has(key) ? null : item);
     }
-    return matched;
+    return byKey;
+}
+
+function recoverOutlineHeadings(bookmarks, bookmarksByKey, headings, matched, sourceMap, chromeRanges, source) {
+    if (!Array.isArray(sourceMap) || !sourceMap.length) return [];
+    const existingKeys = new Set(headings.map(heading => outlineHeadingMatchKey(heading.text)));
+    const hidden = [
+        ...normalizeChromeRanges(chromeRanges, source.length),
+        ...markdownSectionRanges(source),
+    ];
+    const candidates = [];
+    for (const [index, bookmark] of bookmarks.entries()) {
+        const key = outlineHeadingMatchKey(bookmark.title);
+        const printed = bookmark.heading;
+        if (!printed || existingKeys.has(key) || bookmarksByKey.get(key) !== bookmark
+            || outlineHeadingMatchKey(printed.text) !== key) continue;
+        const before = matched.slice(0, index).findLast(Boolean)?.offset ?? -1;
+        const after = matched.slice(index + 1).find(Boolean)?.offset ?? source.length;
+        const offset = findPrintedHeadingAnchor(printed, sourceMap, source.length);
+        if (offset === null || offset <= before || offset >= after
+            || headings.some(heading => heading.offset === offset)
+            || hidden.some(range => range.from <= offset && offset < range.to)) continue;
+        candidates.push({ offset, level: bookmark.level, text: printed.text, recovered: true });
+    }
+    const counts = new Map();
+    for (const { offset } of candidates) {
+        counts.set(offset, (counts.get(offset) || 0) + 1);
+    }
+    return candidates.filter(({ offset }) => counts.get(offset) === 1);
+}
+
+function findPrintedHeadingAnchor(heading, sourceMap, documentLength) {
+    const box = heading.bbox;
+    if (!Array.isArray(box) || box.length !== 4 || !box.every(Number.isFinite)) return null;
+    let closest = null;
+    let ambiguous = false;
+    for (const block of sourceMap) {
+        const offset = block?.markdownFrom;
+        if (!Number.isSafeInteger(offset) || offset < 0 || offset >= documentLength) continue;
+        if (!Array.isArray(block.locations)) continue;
+        for (const location of block.locations) {
+            const candidate = location?.bbox;
+            if (location?.pageIndex !== heading.pageIndex
+                || !Array.isArray(candidate) || candidate.length !== 4
+                || !candidate.every(Number.isFinite)
+                || candidate[0] >= candidate[2] || candidate[1] >= candidate[3]
+                || candidate[0] > box[2] + 12 || candidate[2] < box[0] - 12) continue;
+            if (candidate[1] < box[3] - 4) {
+                if (candidate[1] < box[1] - 4 && candidate[3] > box[3] + 4) return null;
+                continue;
+            }
+            if (!closest || candidate[1] < closest.top) {
+                closest = { offset, top: candidate[1] };
+                ambiguous = false;
+            }
+            else if (candidate[1] === closest.top && offset !== closest.offset) {
+                ambiguous = true;
+            }
+        }
+    }
+    return ambiguous ? null : closest?.offset ?? null;
 }
 
 function flattenPdfOutline(nodes, level = 1, output = []) {
@@ -113,10 +186,7 @@ function flattenPdfOutline(nodes, level = 1, output = []) {
         if (output.length >= MAX_PDF_OUTLINE_ENTRIES) break;
         const title = String(node?.title || '').trim();
         if (title) {
-            output.push({
-                title,
-                level: clampOutlineLevel(level),
-            });
+            output.push({ title, level: clampOutlineLevel(level), heading: node.heading });
         }
         if (Array.isArray(node?.items) && node.items.length) {
             flattenPdfOutline(
@@ -129,7 +199,7 @@ function flattenPdfOutline(nodes, level = 1, output = []) {
     return output;
 }
 
-function outlineMatchKey(text) {
+export function outlineHeadingMatchKey(text) {
     return markdownHeadingKey(
         String(text || '').trim().replace(SECTION_NUMBER_PREFIX_PATTERN, '')
     );

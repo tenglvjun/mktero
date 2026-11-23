@@ -5828,6 +5828,108 @@ test('shows resolved reference text when a rendered citation is hovered', () => 
     dom.window.close();
 });
 
+test('highlights bracketed author-year citations and previews all matched works', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const single = '[Clark and Chalmers, 1998]';
+    const group = '[Lewis et al., 2020, Park et al., 2023, Packer et al., 2023, '
+        + 'Chhikara et al., 2025, Xu et al., 2025b]';
+    const narrative = 'Xu et al. [2025b]';
+    const markdown = [
+        `Consider ${single} and related work ${group}.`,
+        `See also ${narrative} and [unknown wording].`,
+        '',
+        '## References',
+        '',
+        'Clark, A., & Chalmers, D. (1998). The extended mind.',
+        '',
+        'Lewis, P., & Perez, E. (2020). Retrieval.',
+        '',
+        'Park, J. S., & O’Brien, J. (2023). Simulation.',
+        '',
+        'Packer, C., & Fang, V. (2023). Context management.',
+        '',
+        'Chhikara, P., & Khant, D. (2025). Memory.',
+        '',
+        'Xu, W., & Zhao, Q. (2025b). Long-term memory.',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+    });
+    try {
+        const citations = [...document.querySelectorAll('.cm-mktero-citation')];
+        assert.deepEqual(citations.map(citation => citation.textContent), [
+            single, group, narrative,
+        ]);
+        hoverReference(dom.window, citations[1]);
+
+        const items = document.querySelectorAll('.mktero-citation-popup-item');
+        assert.equal(items.length, 5);
+        assert.match(items[0].textContent, /Lewis/);
+        assert.match(items[4].textContent, /Xu.*2025b/);
+        assert.equal(editor.getMarkdown(), markdown);
+    }
+    finally {
+        editor.destroy();
+        dom.window.close();
+    }
+});
+
+test('keeps links and code with citation-shaped text separate from citations', () => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const label = '[Smith, 2020]';
+    const markdown = [
+        `Inline ${label}(https://example.org/inline) and named ${label}[source].`,
+        `Shortcut ${label} and code \`${label}\`.`,
+        `Plain [Clark, 1998] and unsafe [(Smith, 2020)](javascript:alert%281%29).`,
+        'Year shortcut Smith [2020].',
+        '',
+        '[source]: https://example.org/named',
+        `${label}: https://example.org/shortcut`,
+        '[2020]: https://example.org/year',
+        '',
+        '## References',
+        '',
+        'Smith, A. (2020). First study.',
+        '',
+        'Clark, A. (1998). Second study.',
+    ].join('\n');
+    const opened = [];
+    const editor = createInlineMarkdownEditor({
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        openLink: url => opened.push(url),
+    });
+    try {
+        assert.deepEqual(
+            [...document.querySelectorAll('.cm-mktero-citation')]
+                .map(citation => citation.textContent),
+            ['[Clark, 1998]']
+        );
+        for (const link of document.querySelectorAll('.cm-mktero-link')) {
+            link.dispatchEvent(new dom.window.MouseEvent('mousedown', {
+                bubbles: true, cancelable: true, ctrlKey: true,
+            }));
+        }
+        assert.deepEqual(opened, [
+            'https://example.org/inline',
+            'https://example.org/named',
+            'https://example.org/shortcut',
+            'https://example.org/year',
+        ]);
+    }
+    finally {
+        editor.destroy();
+        dom.window.close();
+    }
+});
+
 test('renders bracketed numeric citations with full-width separators', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,
