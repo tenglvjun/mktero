@@ -119,6 +119,22 @@ export function readResearchNoteExcerpts(html, { parseHTML }) {
     return [...rows.values()];
 }
 
+export function researchNoteSourceCount(html, { parseHTML, attachmentURI, positions }) {
+    if (html === null) return null;
+    const positionKey = pos => JSON.stringify([pos.pageIndex, pos.rects, pos.nextPageRects]);
+    const keys = new Set(positions.filter(pos => pos && rectsAreValid(pos.rects)).map(positionKey));
+    const document = parseHTML('<!doctype html><html><body>' + html + '</body></html>');
+    if (!document?.body) return null;
+    let count = 0;
+    for (const node of document.body.querySelectorAll(HIGHLIGHT)) {
+        const source = annotationSource(node);
+        if (source?.attachmentURI === attachmentURI && keys.has(positionKey(source.position))) {
+            count++;
+        }
+    }
+    return count;
+}
+
 export function researchNoteReviewHTML(excerpts, labels, { parseHTML }) {
     const document = parseHTML('<!doctype html><html><body></body></html>');
     const body = document.body;

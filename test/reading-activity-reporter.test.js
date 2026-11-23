@@ -166,6 +166,68 @@ test('a cycle posts the counters and resets them', async () => {
     reporter.dispose();
 });
 
+test('research note use can be the only reported activity', async () => {
+    const timers = timerHarness();
+    const counter = createReadingActivityCounter({ now: () => NOW });
+    counter.researchNoteUsed();
+    counter.researchNoteUsed();
+    const bodies = [];
+    const reporter = startReadingActivityReporter(signedInZotero(), {
+        counter,
+        fetchImpl: async (_url, init) => {
+            bodies.push(JSON.parse(init.body));
+            return jsonResponse(204);
+        },
+        now: () => NOW,
+        ...timers,
+    });
+    await timers.runNext();
+    await timers.runNext();
+    assert.deepEqual(bodies, [{
+        day: '2023-11-14',
+        readers_opened: 0,
+        documents_read: 0,
+        readers_scrolled: 0,
+        deep_reads: 0,
+        annotations_created: 0,
+        exports: 0,
+        translations: 0,
+        research_note_used: true,
+    }]);
+    reporter.dispose();
+});
+
+test('a server that rejects research note use still receives the reading counters', async () => {
+    const timers = timerHarness();
+    const counter = counterWithActivity();
+    counter.researchNoteUsed();
+    const bodies = [];
+    const reporter = startReadingActivityReporter(signedInZotero(), {
+        counter,
+        fetchImpl: async (_url, init) => {
+            const body = JSON.parse(init.body);
+            bodies.push(body);
+            return body.research_note_used
+                ? jsonResponse(400, { error: { code: 'invalid_request' } })
+                : jsonResponse(204);
+        },
+        now: () => NOW,
+        ...timers,
+    });
+    await timers.runNext();
+    assert.equal(bodies.length, 2);
+    const { research_note_used: used, ...legacy } = bodies[0];
+    assert.equal(used, true);
+    assert.deepEqual(bodies[1], legacy);
+    assert.equal(legacy.readers_opened, 1);
+
+    counter.researchNoteUsed();
+    await timers.runNext();
+    assert.equal(bodies.length, 3, 'no empty legacy request for note-only use');
+    assert.deepEqual(timers.pendingDelays(), [READING_ACTIVITY_INTERVAL_MS]);
+    reporter.dispose();
+});
+
 // A server that predates the endpoint must not cost the operator a day of data,
 // which is the whole reason the client ships before the server in some rollouts.
 test('a 404 keeps the batch for the next cycle', async () => {

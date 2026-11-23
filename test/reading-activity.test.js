@@ -120,6 +120,23 @@ test('take resets the counters', () => {
     assert.equal(counter.take(), null);
 });
 
+test('research note use stays on its UTC day and excludes note and paper metadata', () => {
+    let now = Date.UTC(2026, 10, 9, 23, 59);
+    const counter = createReadingActivityCounter({ now: () => now });
+    counter.researchNoteUsed();
+    now = Date.UTC(2026, 10, 10, 0, 1);
+    counter.exported();
+
+    const first = counter.take();
+    assert.deepEqual(readingActivityCountersFromPayload({
+        ...first,
+        noteKey: 'NOTE0001',
+        paperKey: 'PAPR0001',
+        text: 'Excerpt',
+    }), { ...emptyPayload('2026-11-09'), research_note_used: true });
+    assert.deepEqual(counter.take(), { ...emptyPayload('2026-11-10'), exports: 1 });
+});
+
 test('an increment after midnight parks the previous day instead of merging into a new one', () => {
     let now = Date.UTC(2026, 10, 9, 23, 59);
     const counter = createReadingActivityCounter({ now: () => now });
