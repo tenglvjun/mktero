@@ -21,7 +21,9 @@ import {
     rewriteNoteHighlightMath,
 } from '../core/zotero-note-math.js';
 import { insertedTopLevelRange, noteCaretAfterInsert } from '../core/zotero-note-caret.js';
-import { readResearchNoteExcerpts, researchNoteReviewHTML } from '../core/research-note-excerpts.js';
+import {
+    readResearchNoteExcerpts, researchNoteReviewHTML, researchNoteSourceCount,
+} from '../core/research-note-excerpts.js';
 import { noteMathClipboardHTML } from '../markdown/zotero-note-clipboard.js';
 import {
     noteMathSegmentsText,
@@ -74,6 +76,7 @@ export function createZoteroNotes(zotero, {
     )),
     readClipboardHTML = () => '',
     openExcerptMarkdown = null,
+    beginResearchNoteUsage = null,
 } = {}) {
     const observers = new Set();
     let notifierID = null;
@@ -93,6 +96,31 @@ export function createZoteroNotes(zotero, {
     const libraryEditable = libraryID => (
         zotero?.Libraries?.get?.(libraryID)?.editable !== false
     );
+    function trackExcerpt(attachmentID, item, annotations, editorInstance) {
+        if (!beginResearchNoteUsage || item.parentID) return null;
+        return recordUsageSafely(() => {
+            const attachment = attachmentFor(attachmentID);
+            if (!attachment || getResearchNoteTarget(zotero, item.libraryID) !== item.key) return null;
+            const confirm = beginResearchNoteUsage();
+            if (!confirm) return null;
+            const attachmentURI = zotero.URI?.getItemURI?.(attachment);
+            const positions = annotations.filter(annotation => (
+                annotation?.attachmentItemID === attachmentID
+                && ['highlight', 'underline'].includes(annotation.type)
+            )).map(annotation => annotation.position);
+            if (!attachmentURI || !positions.length) return null;
+            const options = { parseHTML, attachmentURI, positions };
+            const before = researchNoteSourceCount(readNoteReviewSnapshot(editorInstance), options);
+            if (before === null) return null;
+            return currentInstance => recordUsageSafely(() => {
+                if (getResearchNoteTarget(zotero, item.libraryID) !== item.key) return false;
+                const after = researchNoteSourceCount(readNoteReviewSnapshot(currentInstance), options);
+                if (after === null || after <= before) return false;
+                confirm();
+                return true;
+            });
+        });
+    }
 
     const scheduleNotify = () => {
         if (notifyTimer !== null || !observers.size) return;
@@ -274,15 +302,21 @@ export function createZoteroNotes(zotero, {
             if (!row?.available || !sourceIsCurrent()) {
                 throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The excerpt source is unavailable');
             }
+            const confirmUsage = recordUsageSafely(beginResearchNoteUsage);
             const ensureCurrent = async () => {
                 await requireResearchNote(attachmentID, noteID);
                 return sourceIsCurrent();
             };
-            if (await openExcerptMarkdown?.(row, { isCurrent: ensureCurrent })) return;
+            if (await openExcerptMarkdown?.(row, { isCurrent: ensureCurrent })) {
+                recordUsageSafely(confirmUsage);
+                return;
+            }
             if (!await ensureCurrent() || !owner?.ZoteroPane?.viewPDF) {
                 throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The excerpt source is unavailable');
             }
-            return owner.ZoteroPane.viewPDF(row.pdfID, { position: row.source.position });
+            const result = await owner.ZoteroPane.viewPDF(row.pdfID, { position: row.source.position });
+            if (result !== false) recordUsageSafely(confirmUsage);
+            return result;
         },
 
         async createResearchNote(attachmentID, { title = '' } = {}) {
@@ -543,6 +577,7 @@ export function createZoteroNotes(zotero, {
                     appendingReview = true;
                     try {
                         requireEditable();
+                        const confirmUsage = recordUsageSafely(beginResearchNoteUsage);
                         const editorInstance = await instance();
                         const before = noteEditorSnapshot(editor, editorInstance);
                         const html = readNoteReviewSnapshot(editorInstance);
@@ -566,9 +601,10 @@ export function createZoteroNotes(zotero, {
                             pos: before.doc.content.size,
                             html: content,
                         });
-                        await confirmResearchNoteReview(editor, before, labels, {
+                        const confirmed = await confirmResearchNoteReview(editor, before, labels, {
                             delay, isCurrent, isDestroyed: () => destroyed,
                         });
+                        if (confirmed) recordUsageSafely(confirmUsage);
                     }
                     finally {
                         appendingReview = false;
@@ -582,6 +618,7 @@ export function createZoteroNotes(zotero, {
                     requireEditable();
                     editorInstance.focus?.();
                     const before = noteEditorSnapshot(editor, editorInstance);
+                    const capture = before && trackExcerpt(attachmentID, item, annotations, editorInstance);
                     const inserted = await insertAnnotationsWithMath(
                         zotero,
                         editorInstance,
@@ -596,6 +633,7 @@ export function createZoteroNotes(zotero, {
                         delay,
                         isDestroyed: () => destroyed,
                         logError: error => zotero?.logError?.(error),
+                        onDocumentChange: capture,
                     });
                 },
                 focus() {
@@ -1042,6 +1080,16 @@ function findNoteEditorView(editor, instance = editor?.getCurrentInstance?.()) {
     }
 }
 
+function recordUsageSafely(action) {
+    try {
+        return action?.() ?? null;
+    }
+    catch {
+        // Reporting is best effort and must not affect the note operation.
+        return null;
+    }
+}
+
 function noteEditorSnapshot(editor, instance) {
     const view = findNoteEditorView(editor, instance);
     return view ? { view, doc: view.state.doc } : null;
@@ -1063,7 +1111,7 @@ async function confirmResearchNoteReview(editor, before, labels, {
 }) {
     const attempts = Math.ceil(NOTE_CARET_WAIT_MS / EDITOR_INSTANCE_POLL_MS);
     for (let attempt = 0; attempt < attempts; attempt++) {
-        if (isDestroyed() || !isCurrent()) return;
+        if (isDestroyed() || !isCurrent()) return false;
         const view = findNoteEditorView(editor);
         if (view !== before.view) break;
         const { state } = view;
@@ -1083,7 +1131,7 @@ async function confirmResearchNoteReview(editor, before, labels, {
                 view.dispatch(state.tr.setSelection(selection).scrollIntoView());
             }
             view.focus?.();
-            return;
+            return true;
         }
         await delay(EDITOR_INSTANCE_POLL_MS);
     }
@@ -1094,7 +1142,7 @@ async function confirmResearchNoteReview(editor, before, labels, {
 // where the inserted content ends. A view replaced meanwhile (a new note is
 // saved first, which may reload it) restarts from its document. A failure is
 // logged and leaves the caret where the editor put it.
-async function moveCaretAfterInsert(editor, before, { delay, isDestroyed, logError }) {
+async function moveCaretAfterInsert(editor, before, { delay, isDestroyed, logError, onDocumentChange }) {
     if (!before || typeof delay !== 'function') return;
     try {
         let { view, doc } = before;
@@ -1104,10 +1152,12 @@ async function moveCaretAfterInsert(editor, before, { delay, isDestroyed, logErr
             const current = findNoteEditorView(editor);
             if (!current) return;
             if (current !== view) {
+                if (onDocumentChange?.(editor.getCurrentInstance?.())) onDocumentChange = null;
                 view = current;
                 doc = current.state.doc;
             }
             else if (documentChanged(current.state.doc, doc)) {
+                onDocumentChange?.(editor.getCurrentInstance?.());
                 placeNoteCaret(current, doc);
                 return;
             }

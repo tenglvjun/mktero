@@ -4,12 +4,14 @@ import {
     reportMkteroClientVersion,
     reportMkteroReadingActivity,
 } from './account-client.js';
+import { isAcceptableReadingActivityDay } from './reading-activity.js';
 import {
     accessTokenNeedsRefresh,
     ACCOUNT_REFRESH_ATTEMPT_ID_PREF,
     clearAccountSession,
     getAccountApiBase,
     getAccountSession,
+    getAccountSessionEpoch,
     saveAccountSession,
 } from '../config/account-preferences.js';
 
@@ -251,10 +253,17 @@ export function startReadingActivityReporter(zotero, {
     // caller can wait the full interval) and false when the same batch should be
     // retried sooner.
     const send = async ({ timeoutMs = READING_ACTIVITY_REQUEST_TIMEOUT_MS } = {}) => {
+        if (disposed) return false;
+        const epoch = getAccountSessionEpoch(zotero);
+        const { email } = getAccountSession(zotero);
+        const isCurrent = () => !disposed
+            && getAccountSessionEpoch(zotero) === epoch
+            && getAccountSession(zotero).email === email;
         // A held batch goes first: it is older, and once the service has the
         // endpoint it is the one most likely to expire. A newer batch waits until
         // the held one is accepted or dropped, which is also what bounds the hold
         // to a single day.
+        if (retryBatch && !isAcceptableReadingActivityDay(retryBatch.day, now)) retryBatch = null;
         const payload = retryBatch || counter.take();
         if (!payload) {
             notifySchedule({ idle: true });
@@ -275,11 +284,13 @@ export function startReadingActivityReporter(zotero, {
                 sleep,
                 secureRandom,
             });
+            if (!isCurrent()) return true;
             await deliver(accessToken);
             retryBatch = null;
             return true;
         }
         catch (error) {
+            if (!isCurrent()) return true;
             notifySchedule({
                 sendFailed: String(error?.message || error),
                 status: error?.status,
@@ -301,11 +312,13 @@ export function startReadingActivityReporter(zotero, {
                         secureRandom,
                         forceRefresh: true,
                     });
+                    if (!isCurrent()) return true;
                     await deliver(refreshed);
                     retryBatch = null;
                     return true;
                 }
                 catch (retryError) {
+                    if (!isCurrent()) return true;
                     if (isAccountSessionInvalidLike(retryError)) {
                         retryBatch = null;
                         return true;

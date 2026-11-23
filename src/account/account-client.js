@@ -1,6 +1,7 @@
 import { mkteroVersion } from '../config/runtime-config.js';
 import { createRuntimeAbortController } from '../platform/abort-controller.js';
 import { parseConversionQuota } from './conversion-quota.js';
+import { readingActivityCountersFromPayload } from './reading-activity.js';
 
 const JSON_HEADERS = Object.freeze({
     Accept: 'application/json',
@@ -174,10 +175,7 @@ export async function reportMkteroClientVersion({
 
 // reportMkteroReadingActivity sends one flush of daily reading totals.
 //
-// The payload is built by reading-activity.js and contains only seven counters
-// and a UTC day. This function deliberately takes that already-trimmed object
-// instead of raw arguments, so nothing richer can be added to the wire here
-// without also changing the module that documents what is collected.
+// The payload contains daily counters and an optional research note use flag.
 export async function reportMkteroReadingActivity({
     apiBase,
     accessToken,
@@ -185,10 +183,24 @@ export async function reportMkteroReadingActivity({
     fetchImpl = globalThis.fetch,
     timeoutMs = 0,
 } = {}) {
-    await postJSON(fetchImpl, apiBase, '/api/v1/me/reading-activity', counters || {}, {
-        token: accessToken,
-        timeoutMs,
+    const payload = readingActivityCountersFromPayload(counters);
+    const post = payload => postJSON(fetchImpl, apiBase, '/api/v1/me/reading-activity', payload, {
+        token: accessToken, timeoutMs,
     });
+    try {
+        await post(payload || {});
+    }
+    catch (error) {
+        if (payload?.research_note_used !== true
+            || error?.status !== 400 || error?.code !== 'invalid_request') {
+            throw error;
+        }
+        // Older servers reject unknown JSON fields. Preserve existing counters.
+        const { research_note_used: _, day, ...legacyCounters } = payload;
+        if (Object.values(legacyCounters).some(value => value > 0)) {
+            await post({ day, ...legacyCounters });
+        }
+    }
 }
 
 // updateMkteroNickname replaces the display nickname of the signed-in account.

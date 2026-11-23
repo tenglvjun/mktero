@@ -1934,6 +1934,50 @@ test('Add to Note keeps the caret when the view is unavailable or nothing arrive
     assert.deepEqual(view.dispatched, []);
 });
 
+test('research note use requires a newly inserted source-linked excerpt in the pinned note', async () => {
+    const attachment = pdfAttachment();
+    const note = standaloneNoteItem({ id: 8, key: 'RESEARCH' });
+    const zotero = createFakeZotero([attachment, parentItem(), note]);
+    const attachmentURI = 'http://zotero.org/users/1/items/PDF00001';
+    zotero.URI = { getItemURI: () => attachmentURI };
+    const position = { pageIndex: 0, rects: [[1, 2, 3, 4]] };
+    const source = encodeURIComponent(JSON.stringify({ attachmentURI, position }));
+    const excerpt = '<p><span class="highlight" data-annotation="' + source + '">Selection</span></p>';
+    const owner = createEditorWindow();
+    const view = createFakeNoteView(fakeDoc([fakeParagraph()]));
+    let usage = 0;
+    let html = '<p>Existing note</p>';
+    let insertSource = false;
+    const notes = createZoteroNotes(zotero, {
+        getMainWindow: () => owner,
+        parseHTML: text => new DOMParser().parseFromString(text, 'text/html'),
+        delay: async () => view.applyPending(),
+        beginResearchNoteUsage: () => () => { usage++; },
+    });
+    await notes.pinResearchNote(42, note.id);
+    const handle = await notes.mountEditor(createContainer(), {
+        attachmentID: 42, noteID: note.id, kind: 'research', focus: false,
+    });
+    const instance = noteInstanceWithView(view, {
+        async insertAnnotations() {
+            html += insertSource ? excerpt : '<p>Unlinked text</p>';
+            view.pending = fakeDoc([fakeParagraph(), fakeAnnotationParagraph()]);
+        },
+    });
+    instance._iframeWindow.wrappedJSObject.getDataSync = () => ({ html });
+    owner.editors[0].instance = instance;
+    const annotations = [{ attachmentItemID: 42, type: 'highlight', position, text: 'Selection' }];
+    assert.equal(usage, 0);
+
+    await handle.insertAnnotations(annotations);
+    assert.equal(usage, 0);
+
+    insertSource = true;
+    await handle.insertAnnotations(annotations);
+    assert.equal(usage, 1);
+    handle.destroy();
+});
+
 test('a hosted formula paste puts the caret after the pasted formula', async () => {
     const listeners = [];
     const iframe = {
@@ -1989,6 +2033,7 @@ test('rereading prefers local Markdown and falls back to the saved PDF position 
     const zotero = createFakeZotero([pdfAttachment(), other, parentItem(), note]);
     zotero.URI = { getURIItem: async uri => uri === attachmentURI ? other : null };
     let destination;
+    let usage = 0;
     let markdownAvailable = true;
     let changeTabOnLookup = false;
     const owner = {
@@ -1996,6 +2041,7 @@ test('rereading prefers local Markdown and falls back to the saved PDF position 
         ZoteroPane: { viewPDF: (...args) => { destination = args; } },
     };
     const notes = createZoteroNotes(zotero, {
+        beginResearchNoteUsage: () => () => { usage++; },
         parseHTML: html => new DOMParser().parseFromString(html, 'text/html'),
         getMainWindow: () => owner,
         openExcerptMarkdown: async (row, { isCurrent }) => {
@@ -2010,12 +2056,15 @@ test('rereading prefers local Markdown and falls back to the saved PDF position 
     await notes.pinResearchNote(42, note.id);
     const { excerpts } = await notes.listResearchNoteExcerpts(42, note.id);
     assert.equal(excerpts[0].title, 'Other PDF');
+    assert.equal(usage, 0);
     await notes.openResearchNoteExcerpt(42, note.id, excerpts[0].id);
     assert.equal(destination, undefined);
+    assert.equal(usage, 1);
 
     markdownAvailable = false;
     await notes.openResearchNoteExcerpt(42, note.id, excerpts[0].id);
     assert.deepEqual(destination, [43, { position }]);
+    assert.equal(usage, 2);
 
     destination = undefined;
     changeTabOnLookup = true;
@@ -2026,4 +2075,5 @@ test('rereading prefers local Markdown and falls back to the saved PDF position 
     await notes.clearResearchNote(42);
     await assert.rejects(notes.openResearchNoteExcerpt(42, note.id, excerpts[0].id),
         codeError('MKTERO_NOTE_TARGET_CHANGED'));
+    assert.equal(usage, 2);
 });

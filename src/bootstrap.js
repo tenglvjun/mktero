@@ -742,6 +742,7 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     runtime.localAnnotations = localAnnotations;
     runtime.zoteroNotes = createZoteroNotes(Zotero, {
+        beginResearchNoteUsage,
         openExcerptMarkdown: (row, options) => openExcerptMarkdown(row, {
             ...options,
             async getViewports(pageIndexes) {
@@ -3074,6 +3075,8 @@ function syncReadingActivityReporter(options) {
     if (accountChanged && runtime.readingActivity) {
         // A different account is signed in. The held totals belong to the
         // previous one and must not be sent under this session.
+        runtime.readingActivityReporter?.dispose();
+        runtime.readingActivityReporter = null;
         runtime.readingActivity = null;
     }
     runtime.readingActivityEpoch = epoch;
@@ -3131,6 +3134,16 @@ function recordAnnotationCreated() {
     catch (error) {
         logMkteroError(error);
     }
+}
+
+function beginResearchNoteUsage() {
+    const reporter = runtime.readingActivityReporter;
+    const counter = runtime.readingActivity;
+    if (!reporter || !counter) return null;
+    return () => {
+        if (runtime.readingActivityReporter !== reporter) return;
+        counter.researchNoteUsed();
+    };
 }
 
 function recordExportCompleted() {

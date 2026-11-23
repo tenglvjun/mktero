@@ -1,10 +1,8 @@
 // Daily reading-activity counters sent to the Mktero service.
 //
 // This module accumulates only totals. It never records which paper was read,
-// when each action happened, or any text from the document: the payload is seven
-// integers and one UTC day. That is a product decision, not an implementation
-// shortcut, so anything richer belongs in a different module with a different
-// privacy review.
+// when each action happened, or any text from the document. A flush contains
+// daily counters and, when applicable, a flag for research note use.
 //
 // Counts are held in memory and lost on a crash, which is deliberate. Persisting
 // them would create a second on-disk reading history with its own retention and
@@ -101,6 +99,11 @@ export function createReadingActivityCounter({
             counts.translations = bump(counts.translations, 1);
         },
 
+        researchNoteUsed() {
+            roll();
+            counts.research_note_used = true;
+        },
+
         // True when a flush would carry something. A reporter checks this before
         // opening a request, so an idle session sends nothing at all. It never
         // moves the day: only take() does that.
@@ -145,7 +148,7 @@ export function createReadingActivityCounter({
 
     function hasCounts() {
         for (const value of Object.values(counts)) {
-            if (value > 0) return true;
+            if (value === true || value > 0) return true;
         }
         return false;
     }
@@ -231,6 +234,7 @@ export function readingActivityCountersFromPayload(payload) {
         annotations_created: normalizeCounter(payload.annotations_created),
         exports: normalizeCounter(payload.exports),
         translations: normalizeCounter(payload.translations),
+        ...(payload.research_note_used === true ? { research_note_used: true } : {}),
     };
 }
 
