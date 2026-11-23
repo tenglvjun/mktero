@@ -114,6 +114,8 @@ A selection split into more than 512 separate parts is refused with a message ra
 
 Common MinerU LaTeX math symbols and simple subscripts are normalized to the PDF's extracted text. Matching tolerates a few characters mangled by the PDF text layer, so selections containing formulas can still be located. A display formula whose LaTeX does not survive extraction falls back to that block's recorded OCR region.
 
+When locating Chinese text on a PDF page, Mktero can match across line breaks or extra spacing between Han characters. If more than one location matches, the page and surrounding text help identify it. If the match remains ambiguous, the highlight stays local.
+
 When loading a PDF annotation back into Markdown, Mktero handles line-end hyphens that either join a split word or remain part of a compound word, including both forms in one annotation. Each complete candidate must retain ordinary word boundaries and unwrapped lexical hyphens; conflicting candidates stay ambiguous. Its PDF position and surrounding text help distinguish repeated passages. If a page header or a different PDF reading order prevents one side from matching anywhere, a unique match on the other side is enough. Conflicting contexts or multiple remaining matches stay marked as ambiguous.
 
 Cross-page matching can leave out repeated notices at the physical top or bottom of a page when their visual position and separation from the body confirm that they are page furniture. This also covers long notices whose PDF text fragments arrive out of order. Body text, unique edge text, and uncertain lines remain part of the search; an ambiguous selection is still refused.

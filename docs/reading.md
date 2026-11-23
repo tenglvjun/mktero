@@ -36,7 +36,7 @@ To go from the PDF to Markdown:
 2. A unique overlapping source region opens its Markdown paragraph. If no region overlaps, a passage found in exactly one cached paragraph can still open it.
 3. If that passage has a complete translation, an `Original` view switches to `Bilingual`. An existing `Translation` or `Bilingual` view stays as it is; no translation request starts.
 
-The `PDF source thumbnail` shows a live PDF crop of the current paragraph. Its switch is in `Typography` (`Aa`).
+The `PDF source thumbnail` shows a live PDF crop of the current paragraph. Switch it off in `Typography` (`Aa`) to hide it immediately, even if a crop is still rendering.
 
 When layout evidence, page coordinates, and Markdown ranges agree, Mktero rebuilds figures from the local PDF. A background worker replaces placeholders in place, so slow restoration does not block reading; see the [figure pipeline](./figure-pipeline.md).
 

@@ -8072,6 +8072,101 @@ test('toggles the PDF source peek from the reader toolbar', async () => {
     }
 });
 
+for (const closeDuring of ['queued', 'rendering']) {
+    test(`keeps the PDF source peek hidden when closed during ${closeDuring} work`, async () => {
+        const pending = Promise.withResolvers();
+        const renders = [];
+        const markdown = 'Mapped paragraph for source peek.';
+        const { view, shadow } = createView(createModel({
+            status: 'ready',
+            progress: 100,
+            markdown,
+            sourceMap: [{
+                type: 'text',
+                markdownFrom: 0,
+                markdownTo: markdown.length,
+                locations: [{ pageIndex: 0, bbox: [100, 200, 800, 360] }],
+            }],
+            onRenderSourcePeek() {
+                const render = renders.length
+                    ? { dataURL: 'data:image/jpeg;base64,bmV3' }
+                    : pending.promise;
+                renders.push(render);
+                return render;
+            },
+        }), {}, { sourcePeekDelay: 0 });
+        const toggle = shadow.querySelector('#mktero-source-peek-toggle');
+        const peek = shadow.querySelector('#mktero-source-peek');
+        const image = peek.querySelector('img');
+        const originalRenderCount = closeDuring === 'rendering' ? 1 : 0;
+
+        try {
+            if (closeDuring === 'rendering') await flushView();
+            assert.equal(renders.length, originalRenderCount);
+            toggle.click();
+            await flushView();
+            assert.equal(renders.length, originalRenderCount);
+            if (closeDuring === 'rendering') {
+                pending.resolve({ dataURL: 'data:image/jpeg;base64,b2xk' });
+                await flushView();
+            }
+            assert.equal(toggle.getAttribute('aria-pressed'), 'false');
+            assert.equal(peek.hidden, true);
+            assert.equal(image.hasAttribute('src'), false);
+
+            pending.resolve({ dataURL: 'data:image/jpeg;base64,b2xk' });
+            toggle.click();
+            await flushView();
+            assert.equal(peek.hidden, false);
+            assert.equal(renders.length, originalRenderCount + 1);
+        }
+        finally {
+            view.destroy();
+        }
+    });
+}
+
+test('discards an old PDF source peek result when the thumbnail is enabled again', async () => {
+    const first = Promise.withResolvers();
+    const second = Promise.withResolvers();
+    let renders = 0;
+    const markdown = 'Mapped paragraph for source peek.';
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        progress: 100,
+        markdown,
+        sourceMap: [{
+            type: 'text',
+            markdownFrom: 0,
+            markdownTo: markdown.length,
+            locations: [{ pageIndex: 0, bbox: [100, 200, 800, 360] }],
+        }],
+        onRenderSourcePeek: () => (++renders === 1 ? first.promise : second.promise),
+    }), {}, { sourcePeekDelay: 0 });
+    const toggle = shadow.querySelector('#mktero-source-peek-toggle');
+    const peek = shadow.querySelector('#mktero-source-peek');
+
+    try {
+        await flushView();
+        assert.equal(renders, 1);
+        toggle.click();
+        toggle.click();
+        first.resolve({ dataURL: 'data:image/jpeg;base64,b2xk' });
+        await flushView();
+        assert.equal(renders, 2);
+        assert.equal(peek.hidden, true);
+
+        const newURL = 'data:image/jpeg;base64,bmV3';
+        second.resolve({ dataURL: newURL });
+        await flushView();
+        assert.equal(peek.hidden, false);
+        assert.equal(peek.querySelector('img').getAttribute('src'), newURL);
+    }
+    finally {
+        view.destroy();
+    }
+});
+
 test('opens document find from the keyboard and searches visible Markdown', () => {
     let editor;
     const markdown = 'See BERT in methods and BERT again.';
