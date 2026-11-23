@@ -55,7 +55,7 @@ A deleted note, a note moved under a paper, or a note that is no longer editable
 
 ### Reread the excerpts behind a research question
 
-1. In the pinned research note strip, click `Reread Excerpts`. Text selections, highlights, and underlines with a saved PDF position appear with their paper and page. Use the page button to reopen the original PDF.
+1. In the pinned research note strip, click `Reread Excerpts`. Text selections, highlights, and underlines with a saved PDF position appear with their paper and page. Click the paper and page to go straight to the passage in Mktero when the Markdown is already open or cached locally. If the cached copy is missing or Mktero cannot locate the passage, Zotero opens the original PDF at the saved position.
 2. Select the passages you want to compare. Use `Selected Excerpts` to look at them together, then click `Record in Note`. Mktero appends a record with the selected excerpts and their sources to the ordinary Zotero note.
 3. Write your question and your reasoning in the native editor. Use Zotero’s `Show on Page` on an excerpt to return to its exact source later.
 

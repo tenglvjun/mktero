@@ -73,6 +73,7 @@ export function createZoteroNotes(zotero, {
         globalThis.setTimeout(resolve, milliseconds)
     )),
     readClipboardHTML = () => '',
+    openExcerptMarkdown = null,
 } = {}) {
     const observers = new Set();
     let notifierID = null;
@@ -264,13 +265,24 @@ export function createZoteroNotes(zotero, {
         async openResearchNoteExcerpt(attachmentID, noteID, excerptID, {
             editorHandle, window, isCurrent = () => true,
         } = {}) {
+            const owner = window?.ZoteroPane ? window : getMainWindow();
+            const tabID = owner?.Zotero_Tabs?.selectedID;
+            const sourceIsCurrent = () => isCurrent() && !owner?.closed
+                && owner?.Zotero_Tabs?.selectedID === tabID;
             const { excerpts } = await listResearchNoteExcerpts(attachmentID, noteID, { editorHandle });
             const row = excerpts.find(excerpt => excerpt.id === excerptID);
-            const pane = (window?.ZoteroPane ? window : getMainWindow())?.ZoteroPane;
-            if (!row?.available || !pane?.viewPDF || !isCurrent()) {
+            if (!row?.available || !sourceIsCurrent()) {
                 throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The excerpt source is unavailable');
             }
-            return pane.viewPDF(row.pdfID, { position: row.source.position });
+            const ensureCurrent = async () => {
+                await requireResearchNote(attachmentID, noteID);
+                return sourceIsCurrent();
+            };
+            if (await openExcerptMarkdown?.(row, { isCurrent: ensureCurrent })) return;
+            if (!await ensureCurrent() || !owner?.ZoteroPane?.viewPDF) {
+                throw noteBridgeError(NOTE_EDITOR_UNAVAILABLE, 'The excerpt source is unavailable');
+            }
+            return owner.ZoteroPane.viewPDF(row.pdfID, { position: row.source.position });
         },
 
         async createResearchNote(attachmentID, { title = '' } = {}) {

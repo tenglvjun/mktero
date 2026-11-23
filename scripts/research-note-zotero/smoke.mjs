@@ -661,26 +661,58 @@ export async function runSmoke(config) {
             quote: 'silver gauge', attachmentURI: state.pdfs[1].attachmentURI, pageIndex: state.pdfs[1].pageIndex,
         }];
         await click(reader.root, '.mktero-research-note-reread', 'Reread Excerpts');
+        const sourceButton = row => '.mktero-review-row:nth-child(' + row + ') .mktero-review-source';
+        const findExcerpt = async excerpt => wait(() => {
+            const rows = [...reader.root.querySelectorAll('.mktero-review-row')];
+            const index = rows.findIndex(row => {
+                const text = row.querySelector('label')?.textContent;
+                return text?.includes(excerpt.quote) && text.length <= excerpt.quote.length + 4;
+            });
+            return index >= 0 && index + 1;
+        }, 'excerpt with source ' + excerpt.quote);
+        const waitForMarkdownSource = (fixture, excerpt) => wait(() => {
+            const selectedID = win.Zotero_Tabs.selectedID;
+            if (Zotero.Reader.getByTabID(selectedID)) return false;
+            return [...doc.querySelectorAll('.mktero-tab-host')].map(host => host.shadowRoot).find(root => (
+                root?.querySelector('.cm-content')?.textContent.includes(fixture.markdown)
+                && [...root.querySelectorAll('.cm-mktero-selection-flash')].some(
+                    mark => mark.textContent === excerpt.quote && visible(mark)
+                )
+            ));
+        }, 'flashed Markdown excerpt in ' + fixture.label);
         for (const [index, excerpt] of excerpts.entries()) {
-            const rowIndex = await wait(() => {
-                const rows = [...reader.root.querySelectorAll('.mktero-review-row')];
-                const index = rows.findIndex(row => {
-                    const text = row.querySelector('label')?.textContent;
-                    return text?.includes(excerpt.quote) && text.length <= excerpt.quote.length + 4;
-                });
-                return index >= 0 && index + 1;
-            }, 'excerpt with source ' + excerpt.quote);
+            const rowIndex = await findExcerpt(excerpt);
             if (!afterRestart) {
-                await click(reader.root, `.mktero-review-row:nth-child(${rowIndex}) input`, 'select excerpt for rereading');
+                await click(reader.root, '.mktero-review-row:nth-child(' + rowIndex + ') input',
+                    'select excerpt for rereading');
             }
-            await click(reader.root, `.mktero-review-row:nth-child(${rowIndex}) .mktero-review-source`, 'open excerpt PDF');
-            const fixture = state.pdfs[index];
-            await waitForSourcePDF(fixture, excerpt.pageIndex);
+            await click(reader.root, sourceButton(rowIndex), 'open excerpt Markdown');
+            await waitForMarkdownSource(state.pdfs[index], excerpt);
             await selectReader(reader);
         }
+        checks.push({ check: 'rereading-flashes-exact-excerpts-in-open-markdown-tabs', passed: true });
         if (afterRestart) {
+            const first = state.pdfs[0];
+            const original = readers.find(candidate => candidate.label === first.label);
+            win.Zotero_Tabs.close(original.tab);
+            const rowIndex = await findExcerpt(excerpts[0]);
+            await click(reader.root, sourceButton(rowIndex), 'open locally cached excerpt after closing its tab');
+            await waitForMarkdownSource(first, excerpts[0]);
+            check(win.Zotero_Tabs.selectedID !== original.tab, 'Cached Markdown did not reopen in a new tab');
+            const cachedTab = win.Zotero_Tabs.selectedID;
+            await selectReader(reader);
+            checks.push({ check: 'restart-rereading-opens-markdown-directly-from-local-cache', passed: true });
+            win.Zotero_Tabs.close(cachedTab);
+            await IOUtils.remove(PathUtils.join(config.profile, 'mktero-cache', 'v1', 'entries', first.cacheKey),
+                { recursive: true });
+            await click(reader.root, sourceButton(rowIndex), 'open original PDF after removing Markdown cache');
+            await waitForSourcePDF(first, excerpts[0].pageIndex);
+            check(![...doc.querySelectorAll('.mktero-tab-host')].some(host => (
+                host.shadowRoot?.querySelector('.cm-content')?.textContent.includes(first.markdown)
+            )), 'Cache miss unexpectedly opened a Markdown tab');
+            await selectReader(reader);
             await click(reader.root, '.mktero-review-back', 'back from restored rereading');
-            checks.push({ check: 'restart-rereading-jumps-to-both-real-pdf-pages', passed: true });
+            checks.push({ check: 'missing-markdown-cache-falls-back-to-real-pdf-page', passed: true });
             return;
         }
         await captureWindow('phase-1-reread-excerpts');

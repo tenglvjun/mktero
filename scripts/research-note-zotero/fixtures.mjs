@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createMarkdownCacheKey } from '../../src/cache/markdown-cache.js';
+import { MISTRAL_PARSER_PROFILE_ID } from '../../src/mistral/parser-profile.js';
 import {
     fixturePrefs as sentenceFixturePrefs,
     prepareFixtures as prepareSentenceFixtures,
@@ -26,6 +28,7 @@ export async function prepareFixtures(run, profile) {
         return {
             label: index === 0 ? 'A' : 'B',
             pdfPath: fixture.pdfPath,
+            cacheKey: await createMarkdownCacheKey(pdf, { parserProfile: MISTRAL_PARSER_PROFILE_ID }),
             pageIndex: index,
             markdown: fixture.markdown,
             quote: fixture.sentences[0],

@@ -699,6 +699,28 @@ test('a signed-out reader is reported as needing a sign-in, not read offline', a
     );
 });
 
+test('offline cached reads try both hosted model caches without resolving against the server', async () => {
+    const pipelineKey = 'a'.repeat(64);
+    const extractor = createExtractor({
+        conversion: {
+            resolveTarget() { assert.fail('An offline cached read must not resolve the hosted model'); },
+            convert() { assert.fail('An offline cached read must not convert'); },
+        },
+        createCacheKey: async (_bytes, { parserProfile }) => (
+            parserProfile === hostedCacheProfileFor('pipeline') ? pipelineKey : 'b'.repeat(64)
+        ),
+        createSourceHash: async () => 'e'.repeat(64),
+        isCacheEnabled: () => true,
+        cache: { async get(key) { return key === pipelineKey ? { markdown: '# Retained pipeline' } : null; } },
+    });
+
+    const result = await extractor.readCached(42, { offline: true });
+    assert.equal(result.markdown, '# Retained pipeline');
+    assert.equal(result.cacheKey, pipelineKey);
+    assert.equal(result.hostedModel, 'pipeline');
+    assert.deepEqual(result.warnings, []);
+});
+
 test('a resolve transport failure reads a retained entry and says why', async () => {
     const warnings = [];
     const extractor = createExtractor({

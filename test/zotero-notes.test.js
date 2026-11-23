@@ -1979,7 +1979,7 @@ test('a hosted formula paste puts the caret after the pasted formula', async () 
     handle.destroy();
 });
 
-test('rereading opens the original PDF position even for an unsaved highlight on another paper', async () => {
+test('rereading prefers local Markdown and falls back to the saved PDF position on another paper', async () => {
     const position = { pageIndex: 3, rects: [[1, 2, 3, 4]] };
     const attachmentURI = 'http://zotero.org/users/1/items/BOOK0002';
     const data = encodeURIComponent(JSON.stringify({ attachmentURI, position, pageLabel: 'iv' }));
@@ -1989,15 +1989,40 @@ test('rereading opens the original PDF position even for an unsaved highlight on
     const zotero = createFakeZotero([pdfAttachment(), other, parentItem(), note]);
     zotero.URI = { getURIItem: async uri => uri === attachmentURI ? other : null };
     let destination;
+    let markdownAvailable = true;
+    let changeTabOnLookup = false;
+    const owner = {
+        Zotero_Tabs: { selectedID: 'review' },
+        ZoteroPane: { viewPDF: (...args) => { destination = args; } },
+    };
     const notes = createZoteroNotes(zotero, {
         parseHTML: html => new DOMParser().parseFromString(html, 'text/html'),
-        getMainWindow: () => ({ ZoteroPane: { viewPDF: (...args) => { destination = args; } } }),
+        getMainWindow: () => owner,
+        openExcerptMarkdown: async (row, { isCurrent }) => {
+            assert.equal(row.pdfID, 43);
+            assert.equal(row.text, 'Old selection');
+            assert.equal(row.source.annotationKey, null);
+            assert.deepEqual(row.source.position, position);
+            if (changeTabOnLookup) owner.Zotero_Tabs.selectedID = 'different-tab';
+            return markdownAvailable && await isCurrent();
+        },
     });
     await notes.pinResearchNote(42, note.id);
     const { excerpts } = await notes.listResearchNoteExcerpts(42, note.id);
     assert.equal(excerpts[0].title, 'Other PDF');
     await notes.openResearchNoteExcerpt(42, note.id, excerpts[0].id);
+    assert.equal(destination, undefined);
+
+    markdownAvailable = false;
+    await notes.openResearchNoteExcerpt(42, note.id, excerpts[0].id);
     assert.deepEqual(destination, [43, { position }]);
+
+    destination = undefined;
+    changeTabOnLookup = true;
+    await assert.rejects(notes.openResearchNoteExcerpt(42, note.id, excerpts[0].id),
+        codeError('MKTERO_NOTE_EDITOR_UNAVAILABLE'));
+    assert.equal(destination, undefined);
+
     await notes.clearResearchNote(42);
     await assert.rejects(notes.openResearchNoteExcerpt(42, note.id, excerpts[0].id),
         codeError('MKTERO_NOTE_TARGET_CHANGED'));

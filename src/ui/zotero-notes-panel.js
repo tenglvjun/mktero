@@ -266,15 +266,18 @@ class ZoteroNotesPanel {
 
     async openReviewSource(review, id) {
         if (!this.isCurrentReview(review)) return;
+        const request = {};
+        review.sourceRequest = request;
+        const isCurrent = () => this.isCurrentReview(review) && review.sourceRequest === request;
         try {
             await review.adapter.openResearchNoteExcerpt(review.noteID, id, {
                 editorHandle: this.handle,
                 ...this.hostContext(),
-                isCurrent: () => this.isCurrentReview(review),
+                isCurrent,
             });
         }
         catch {
-            if (!this.isCurrentReview(review)) return;
+            if (!isCurrent()) return;
             review.status = 'notes.reviewSourceUnavailable';
             await this.loadReview(review);
         }

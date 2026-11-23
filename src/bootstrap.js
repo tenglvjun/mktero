@@ -124,9 +124,11 @@ import {
     isInvalidMarkdownRevisionError,
     snapshotStoredMarkdownRevision,
 } from './core/markdown-revision-session.js';
+import { pdfSelectionPagesFromAnnotation } from './core/pdf-selection-source-resolver.js';
 import { selectionRevealChanges } from './core/markdown-selection-reveal.js';
 import {
     revealPdfSelectionAsMarkdown,
+    resolveResearchExcerptRange,
 } from './ui/pdf-selection-markdown.js';
 import {
     createSavedMarkdownOpenResolver,
@@ -740,6 +742,13 @@ globalThis.startup = async function startup({ id, rootURI }) {
     });
     runtime.localAnnotations = localAnnotations;
     runtime.zoteroNotes = createZoteroNotes(Zotero, {
+        openExcerptMarkdown: (row, options) => openExcerptMarkdown(row, {
+            ...options,
+            async getViewports(pageIndexes) {
+                const bytes = await loadPDFFile(row.pdfID);
+                return pdfTextEngine.pageViewports(bytes, pageIndexes);
+            },
+        }),
         // A snapshot note is Mktero's, not the reader's: it is not listed and
         // never receives "Add to Note".
         isSnapshotNote: item => (
@@ -1609,13 +1618,16 @@ async function openItemAsMarkdown(itemID, {
     entryPoint = 'item-menu',
     operation = 'convert',
     localOnly = false,
+    cachedSelection = null,
 } = {}) {
     const importing = operation === 'import-llm-cache';
     if (importing && isItemPreparing(itemID)) {
         throw Object.assign(new Error('The PDF already has an active operation'), { code: 'LLM_CACHE_BUSY' });
     }
-    const presentation = runtime.presenter.open(itemID, {
+    const presenter = runtime.presenter;
+    const presentation = presenter.open(itemID, {
         sourceItemID: itemID,
+        select: !cachedSelection,
         onClose: ({ reason = MARKDOWN_TAB_CLOSE_REASONS.USER } = {}) => {
             runtime.pendingSelectionReveals?.delete(itemID);
             releaseTabConversion(itemID, reason);
@@ -1711,6 +1723,29 @@ async function openItemAsMarkdown(itemID, {
         onReadingPositionChange: anchor => saveReadingPosition(itemID, anchor),
         zoteroNotes: createTabNotesBridge(() => itemID),
     });
+    if (cachedSelection) {
+        let opened = false;
+        try {
+            const readyChanges = await prepareConversionReadyChanges(itemID, cachedSelection.result);
+            const range = cachedSelection.resolveRange(readyChanges);
+            if (!range || !await cachedSelection.isCurrent()
+                || presenter.get(itemID)?.tabID !== presentation.tabID
+                || isItemPreparing(itemID)) return false;
+            if (!presenter.selectPresentation(presentation, Zotero.getMainWindow?.())) return false;
+            presenter.update(presentation, { ...readyChanges, ...excerptRevealChanges(range) });
+            opened = true;
+            void rememberMarkdownReadiness(itemID, cachedSelection.result);
+            refreshPublishedAnnotations(itemID);
+            return true;
+        }
+        finally {
+            if (!opened && presentation.created && !isItemPreparing(itemID)
+                && presenter.get(itemID)?.tabID === presentation.tabID) {
+                presenter.closeForSourceItem(itemID);
+            }
+            if (opened && presentation.created) recordReaderOpened(itemID);
+        }
+    }
     if (presentation.created) {
         // The tab was created, which is the only definition of "opened" this
         // module can be sure of: a same-session reopen reuses the tab and must not
@@ -2142,19 +2177,8 @@ function noteProgressiveDocument(itemID, event) {
 async function publishConversionResult(presentation, itemID, result, signal) {
     if (!result || presentation.closed || signal?.aborted) return;
     void rememberMarkdownReadiness(itemID, result);
-    const revisionResult = await attachRevisionSession(itemID, result, signal);
-    throwIfRevisionAborted(signal);
-    if (presentation.closed) return;
-    const positionedResult = await attachReadingPosition(revisionResult);
-    const readyResult = await attachCachedDocumentTranslation(
-        positionedResult,
-        signal
-    );
+    const readyChanges = await prepareConversionReadyChanges(itemID, result, signal);
     if (presentation.closed || signal?.aborted) return;
-    logFigureAssetSizes(`item ${itemID}: final`, readyResult);
-    const readyChanges = createConversionReadyChanges(
-        localizeConversionResult(readyResult, runtimeTranslate)
-    );
     runtime.presenter?.update(
         presentation,
         {
@@ -2162,6 +2186,19 @@ async function publishConversionResult(presentation, itemID, result, signal) {
             ...consumeSelectionRevealChanges(itemID, readyChanges),
         }
     );
+    refreshPublishedAnnotations(itemID);
+}
+
+async function prepareConversionReadyChanges(itemID, result, signal) {
+    const revisionResult = await attachRevisionSession(itemID, result, signal);
+    throwIfRevisionAborted(signal);
+    const positionedResult = await attachReadingPosition(revisionResult);
+    const readyResult = await attachCachedDocumentTranslation(positionedResult, signal);
+    logFigureAssetSizes(`item ${itemID}: final`, readyResult);
+    return createConversionReadyChanges(localizeConversionResult(readyResult, runtimeTranslate));
+}
+
+function refreshPublishedAnnotations(itemID) {
     // A local synchronization can finish while this tab is still loading.
     // Its notification cannot refresh that view, and the ready result may
     // still contain the earlier pending overlay. Reconcile after publication.
@@ -5449,6 +5486,68 @@ function registerReaderToolbarAction() {
         onError: handleOpenError,
         translate: runtimeTranslate,
     });
+}
+
+async function openExcerptMarkdown(row, { isCurrent, getViewports }) {
+    const itemID = row.pdfID;
+    const pages = pdfSelectionPagesFromAnnotation(row.source);
+    if (!pages) return false;
+    try {
+        const canUseLive = presentation => presentation?.model.status === 'ready'
+            && presentation.model.renderMode !== 'html';
+        const presenter = runtime.presenter;
+        if (!presenter || isItemPreparing(itemID)) return false;
+        const initial = presenter.getForSourceItem(itemID);
+        if (initial && !canUseLive(initial) && initial.model.status !== 'error') return false;
+        const cached = !canUseLive(initial)
+            ? await runtime.service.readCached(itemID, { offline: true })
+            : null;
+        const source = canUseLive(initial) ? initial.model : cached;
+        if (!source) return false;
+
+        let viewports;
+        if (source.sourceMap?.length) {
+            try {
+                viewports = await getViewports(pages.map(page => page.pageIndex));
+            }
+            catch (error) {
+                logMkteroError(error);
+            }
+        }
+        const resolveRange = document => resolveResearchExcerptRange({
+            source: document,
+            pages,
+            text: row.text,
+            rectForBBox: viewports && ((pageIndex, bbox) => (
+                normalizedBBoxToPDFRect(bbox, viewports.get(pageIndex))
+            )),
+        });
+        if (!await isCurrent() || isItemPreparing(itemID)) return false;
+        const current = presenter.getForSourceItem(itemID);
+        if (canUseLive(current)) {
+            const range = resolveRange(current.model);
+            if (!range || !presenter.selectPresentation(current, Zotero.getMainWindow?.())) return false;
+            presenter.update(current, excerptRevealChanges(range));
+            return true;
+        }
+        if (!cached || (current && current.model.status !== 'error') || !resolveRange(cached)) return false;
+        return await openItemAsMarkdown(itemID, {
+            entryPoint: 'research-note-excerpt',
+            cachedSelection: { result: cached, resolveRange, isCurrent },
+        });
+    }
+    catch (error) {
+        if (!isExpectedNoteRefusal(error)) logMkteroError(error);
+        return false;
+    }
+}
+
+function excerptRevealChanges(range) {
+    return {
+        translationView: 'original',
+        revealMarkdownOffset: range.markdownFrom,
+        revealMarkdownTo: range.markdownTo,
+    };
 }
 
 async function openPdfSelectionAsMarkdown(reader, annotation, report) {
