@@ -21,13 +21,15 @@ test('old selections and saved underlines retain their individual PDF positions'
 });
 
 test('review HTML preserves an excerpt with a display formula and escapes note content', () => {
-    const rows = read(`<p>${quote(source, '&lt;script&gt;A')}</p><pre class="math">$$x^2$$</pre>
+    const rows = read(`<p>${quote(source, '&lt;SCRIPT&gt;A')}</p><pre class="math">$$x^2$$</pre>
         <p>${quote(source, 'and B<img src="https://example.test/image">')}</p>`);
     assert.equal(rows.length, 1);
-    assert.match(rows[0].text, /<script>A\s*\$\$x\^2\$\$\s*and B/u);
+    assert.equal(rows[0].text, '<SCRIPT>A\n$$x^2$$\nand B');
     const html = researchNoteReviewHTML(rows, { title: 'Review <one>', question: 'Question',
         excerpts: 'Sources', judgment: 'Judgment' }, { parseHTML });
-    assert.doesNotMatch(html, /<script>|<img|<one>/u);
+    const document = parseHTML('<!doctype html><html><body>' + html + '</body></html>');
+    assert.equal(document.querySelector('script, img, one'), null);
+    assert.equal(document.querySelector('h2')?.textContent, 'Review <one>');
     const roundTrip = read(html);
     assert.equal(roundTrip[0].text, rows[0].text);
     assert.deepEqual(roundTrip[0].source, rows[0].source);
