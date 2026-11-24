@@ -428,10 +428,16 @@ let htmlTableBlockCache = null;
 // `{ citations(), footnotes() }`. The reader already holds them for the text it
 // shows; without them the first selection in a long paper reparses every
 // citation on mouseup.
-export function visibleMarkdownTextForRanges(markdown, ranges, { analyses = null } = {}) {
+export function visibleMarkdownTextForRanges(markdown, ranges, options) {
+    return visibleMarkdownTextPartsForRanges(markdown, ranges, options).join('');
+}
+
+// Each part carries its original separator. A review can lay disjoint
+// ranges out separately while quoting exactly the same text as the store.
+export function visibleMarkdownTextPartsForRanges(markdown, ranges, { analyses = null } = {}) {
     const source = String(markdown || '');
-    if (!Array.isArray(ranges)) return '';
-    return joinedRangeText(source, visibleIndexFor(source, analyses), ranges);
+    if (!Array.isArray(ranges)) return [];
+    return rangeTextParts(source, visibleIndexFor(source, analyses), ranges);
 }
 
 // Selections used to hide the `_` of a formula the Markdown parser paired
@@ -450,25 +456,25 @@ export function legacyMathEmphasisVisibleTextForRanges(markdown, ranges) {
         legacyMathEmphasisIndexCache.clear();
         legacyMathEmphasisIndexCache.set(source, index);
     }
-    return joinedRangeText(source, index, ranges);
+    return rangeTextParts(source, index, ranges).join('');
 }
 
-function joinedRangeText(source, index, ranges) {
-    let text = '';
+function rangeTextParts(source, index, ranges) {
+    const parts = [];
     let previous = null;
     for (const range of ranges) {
-        const part = visibleRangeText(source, index, range);
+        let part = visibleRangeText(source, index, range);
         if (!part) continue;
-        if (text
+        if (parts.length
             && needsSegmentSeparator(source, index, previous, range)
-            && !/\s$/u.test(text)
+            && !/\s$/u.test(parts.at(-1))
             && !/^\s/u.test(part)) {
-            text += ' ';
+            part = ' ' + part;
         }
-        text += part;
+        parts.push(part);
         previous = range;
     }
-    return text;
+    return parts;
 }
 
 // Selections used to re-parse each slice on its own and joined segments

@@ -12895,6 +12895,7 @@ function openTranslationSelectionEditor(t, source, entries, translationView, hos
         parent: document.querySelector('#editor'),
         initialMarkdown: '',
         translateOriginalBlockText: (_id, { from, to }) => source.slice(from, to),
+        createMarkdownAnnotation: () => assert.fail('unexpected annotation write'),
         copySelectionTranslation: async () => {},
         ...hosts,
     });
@@ -13110,9 +13111,10 @@ for (const { view, locale } of ['compare', 'translated'].flatMap(view => (
         assert.equal(document.querySelector('.mktero-annotation-selection-hint'), null);
         const toolbar = popups[0].querySelector('.mktero-translation-source-toolbar');
         assert.deepEqual([...toolbar.querySelectorAll('button')].map(button => button.dataset.action),
-            ['preview-source', 'copy-translation']);
+            ['review-source-annotation', 'preview-source', 'copy-translation']);
         assert.deepEqual([...toolbar.querySelectorAll('button')].map(button => button.textContent),
-            chinese ? ['查看原文', '复制译文'] : ['View original', 'Copy translation']);
+            chinese ? ['标注对应原句', '查看原文', '复制译文']
+                : ['Highlight original text', 'View original', 'Copy translation']);
         assert.equal(document.querySelector('.mktero-translation-source-text'), null);
         assert.equal(document.querySelector('.mktero-related-source-scope'), null);
         assert.equal(document.querySelector('[data-action="annotate-source"]'), null);
@@ -13142,8 +13144,40 @@ for (const { view, locale } of ['compare', 'translated'].flatMap(view => (
         assert.equal(details.open, true);
         assert.equal(document.getSelection().toString(), '这里');
         assert.deepEqual(created, [], 'opening the source preview and save scope does not save an annotation');
+        toolbar.querySelector('[data-action="review-source-annotation"]').click();
+        assert.equal(details.open, true);
+        assert.equal(document.querySelector('.mktero-translation-source-text'), null);
+        assert.equal(details.querySelector('.mktero-translation-annotation-text').textContent, source);
+        assert.deepEqual(created, []);
+        saves[0].click();
+        await settle();
+        assert.deepEqual(created.map(({ text, ranges }) => ({ text, ranges })), [
+            { text: source, ranges: [{ from: 0, to: source.length }] },
+        ]);
     });
 }
+
+test('updates translated highlight actions when annotation creation becomes available or read-only', async t => {
+    const { editor, document, dom, documentOptions } = openTranslationSelectionEditor(
+        t, 'Original sentence.', [['Translated sentence.']], 'translated'
+    );
+    const setWritable = value => editor.setDocument(documentOptions('translated', { canAnnotateTranslation: value }));
+    const action = name => document.querySelector(`[data-action="${name}"]`);
+    setWritable(false);
+    selectEditorText(dom, document, 'Translated');
+    await settleFrame(dom.window);
+    assert.equal(action('review-source-annotation'), null);
+    assert.ok(action('copy-translation'));
+    action('preview-source').click();
+    assert.equal(action('annotate-source'), null);
+    setWritable(true);
+    action('review-source-annotation').click();
+    assert.equal(document.querySelector('details').open, true);
+    setWritable(false);
+    assert.equal(action('review-source-annotation'), null);
+    assert.equal(action('annotate-source'), null);
+    assert.equal(document.querySelector('.mktero-translation-source-text').textContent, 'Original sentence.');
+});
 
 for (const view of ['compare', 'translated']) {
     test(`keeps the source preview through programmatic scroll but dismisses reader gestures in ${view}`, async t => {
@@ -13774,8 +13808,11 @@ test('shows a disjoint verified source and a separate action for a nearby legacy
     const first = 'First evidence';
     const last = 'last evidence.';
     const source = `${first}, intervening text, ${last}\n\nLegacy original.`;
+    const saved = [];
     const { dom, document } = openTranslationSelectionEditor(t, source,
-        ['Aligned words.', 'Legacy words.'], 'compare', {}, (range, index) => index ? [] : [
+        ['Aligned words.', 'Legacy words.'], 'compare', {
+            createMarkdownAnnotation: annotation => saved.push(annotation),
+        }, (range, index) => index ? [] : [
             projectedUnit(range, 'disjoint', { sourceRanges: [
                 { from: 0, to: first.length },
                 { from: source.indexOf(last), to: range.sourceTo },
@@ -13794,6 +13831,15 @@ test('shows a disjoint verified source and a separate action for a nearby legacy
         `${first} ${last}`);
     assert.equal(details.querySelector('.mktero-related-source-scope').textContent,
         'Save scope: matching original sentences');
+    document.querySelector('[data-action="review-source-annotation"]').click();
+    assert.deepEqual([...details.querySelectorAll('.mktero-translation-annotation-part')].map(part => part.textContent.trim()),
+        [first, last]);
+    document.querySelector('[data-action="annotate-source"]').click();
+    await settle();
+    assert.deepEqual(saved.map(({ text, ranges }) => ({ text, ranges })), [{
+        text: `${first} ${last}`,
+        ranges: [{ from: 0, to: first.length }, { from: source.indexOf(last), to: source.indexOf(last) + last.length }],
+    }]);
 });
 
 for (const translationView of ['translated', 'compare']) {
@@ -13823,9 +13869,15 @@ for (const translationView of ['translated', 'compare']) {
         document.querySelector('[data-action="show-source-block"]').click();
         const scope = () => document.querySelector('.mktero-related-source-scope').textContent;
         assert.equal(scope(), 'Save scope: original sentence');
+        document.querySelector('[data-action="review-source-annotation"]').click();
+        const reviewText = () => document.querySelector('.mktero-translation-annotation-text').textContent;
+        assert.equal(reviewText(), 'Second observation.');
+        assert.equal(document.querySelector('.mktero-translation-source-text').textContent, unaligned);
         const include = document.querySelector('[data-action="include-source-block"]');
         include.click();
         assert.equal(scope(), 'Save scope: mapped sentences and selected whole blocks');
+        assert.match(reviewText(), /Alpha source item/);
+        assert.equal(document.querySelector('.mktero-translation-source-text'), null);
         include.click();
         assert.equal(scope(), 'Save scope: original sentence');
         document.querySelector('[data-action="annotate-source"]').click();

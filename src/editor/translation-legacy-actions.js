@@ -34,7 +34,8 @@ export function createWholeBlockActions(document, actions, t, reposition) {
         element,
         refresh(next) {
             if (next.length !== rows.length
-                || !rows.every((row, index) => row.id === next[index].id)) return false;
+                || !rows.every((row, index) => row.id === next[index].id
+                    && row.canInclude === Boolean(next[index].onToggleInclude))) return false;
             rows.forEach((row, index) => row.refresh(next[index]));
             return true;
         },
@@ -92,6 +93,7 @@ function createWholeBlockRow(document, initialAction, t, reposition, index, coun
     return {
         element,
         id: initialAction.id,
+        canInclude: Boolean(include),
         refresh(next) {
             action = next;
             updateControls();

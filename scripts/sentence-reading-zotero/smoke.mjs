@@ -59,47 +59,37 @@ export async function runSmoke(config) {
             await selectExcerpt();
             const wholeBlock = '[data-action="show-source-block"]';
             const oldAlignmentActions = '[data-action="enable-alignment"], [data-action="cancel-alignment"]';
-            if (fixture.kind === 'aligned') {
+            const review = '[data-action="review-source-annotation"]';
+            const preview = await wait(() => root.querySelector('[data-action="preview-source"]'), 'selection toolbar');
+            check(!sourceText() && !root.querySelector('[data-action="annotate-source"]'), 'Selection prematurely opened review');
+            if (fixture.kind !== 'unaligned') {
+                check(root.querySelector(review), 'Verified selection lacks Highlight original text');
+                preview.click();
+                check(sourceText() === fixture.sentences[1], 'Preview did not show the selected original sentence');
                 if (view === 'translated') {
-                    await wait(() => sourceText(), 'source sentence bubble');
-                    check(sourceText() === fixture.sentences[1], `Expected only original sentence; got ${sourceText()}`);
-                    const locate = root.querySelector('[data-action="locate-source"]');
-                    check(locate, 'Source sentence has no locate action');
-                    locate.click();
-                    await wait(() => viewButton('compare').getAttribute('aria-checked') === 'true', 'locate switching to bilingual view');
-                    viewButton('original').click();
+                    root.querySelector('[data-action="locate-source"]').click();
+                    await wait(() => viewButton('original').getAttribute('aria-checked') === 'true', 'locate original view');
                 }
-                else {
-                    await wait(() => marks().length, 'original sentence highlight');
-                    check(marks().join('') === fixture.sentences[1], `Expected only original sentence highlight; got ${marks().join('')}`);
-                    check(!sourceText(), 'Unexpected source bubble in bilingual view');
-                }
-                check(!root.querySelector(wholeBlock), 'Verified selection should show the matched sentence');
+                else check(marks().join('') === fixture.sentences[1], 'Incorrect bilingual source marks');
+                check(!root.querySelector(wholeBlock), 'Unexpected whole-block fallback for a verified sentence');
             }
             else {
-                const show = await wait(() => root.querySelector(wholeBlock), 'show entire original block action');
-                const controls = [...show.closest('section').querySelectorAll('button')];
-                check(controls.length === 1 && controls[0] === show, 'Unaligned selection must offer only the whole-block action');
-                check(!sourceText() && !marks().length, 'Unaligned text was incorrectly presented as a matched sentence');
-                check(!root.querySelector('[data-action="locate-source"], .mktero-related-source-locate'), 'Unaligned text was given a sentence locate action');
-                check(!root.querySelector('[data-action="annotate-source"], .mktero-related-source-create'), 'Unaligned text was given an immediate annotation action');
+                check(!root.querySelector(review), 'Unverified source offered a sentence highlight');
+                preview.click();
+                const show = await wait(() => root.querySelector(wholeBlock), 'show whole block');
+                check(!marks().length && !sourceText(), 'Unaligned text was presented as a matched sentence');
                 show.click();
-                if (view === 'translated') {
-                    await wait(() => sourceText(), 'explicit original block popup');
-                    check(sourceText() === fixture.markdown, `Expected whole original block; got ${sourceText()}`);
-                    check(!marks().length, 'Unexpected in-place highlight in translated view');
-                }
-                else {
-                    await wait(() => marks().length, 'explicit original block highlight');
-                    check(marks().join('') === fixture.markdown, `Expected whole original block highlight; got ${marks().join('')}`);
-                    check(!sourceText(), 'Unexpected source bubble in bilingual view');
-                }
+                check(sourceText() === fixture.markdown, 'Explicit preview did not show the whole block');
+                if (view === 'compare') check(marks().join('') === fixture.markdown, 'Missing bilingual block highlight');
+                check(!root.querySelector('[data-action="annotate-source"]'), 'Viewing the block included it in the highlight');
+                root.querySelector('[data-action="include-source-block"]').click();
+                check(root.querySelector('[data-action="annotate-source"]'), 'Included block cannot be confirmed');
             }
             check(!root.querySelector(oldAlignmentActions), 'Obsolete alignment upgrade action was rendered');
             check(Services.io.offline, 'Gecko went online during reader validation');
             report.push({ fixture: fixture.kind, view, passed: true });
         }
-        if (fixture.kind === 'aligned') await checkDurableAnnotation();
+        if (fixture.kind !== 'unaligned') await checkDurableAnnotation();
         win.Zotero_Tabs.close(tab);
         await wait(() => !root.host.isConnected, 'reader tab cleanup');
 
@@ -130,8 +120,21 @@ export async function runSmoke(config) {
             node.parentElement.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true, composed: true, button: 0 }));
         }
 
+        function mouseClick(button) {
+            const rect = button.getBoundingClientRect();
+            const x = rect.x + rect.width / 2;
+            const y = rect.y + rect.height / 2;
+            check(!button.disabled && button.contains(root.elementFromPoint(x, y)), 'Button is obscured or disabled');
+            let clicks = 0;
+            button.addEventListener('click', () => clicks++, { once: true });
+            win.windowUtils.sendMouseEvent('mousedown', x, y, 0, 1, 0);
+            win.windowUtils.sendMouseEvent('mouseup', x, y, 0, 1, 0);
+            check(clicks === 1, 'The Gecko mouse gesture missed the button');
+        }
+
         async function checkDurableAnnotation() {
-            await stage('aligned / translated one-click annotation');
+            const ambiguous = fixture.kind === 'ambiguous';
+            await stage(`${fixture.kind} / review and confirm`);
             selection().removeAllRanges();
             await changeView('translated');
             const sidebar = root.querySelector('#mktero-annotations');
@@ -150,57 +153,64 @@ export async function runSmoke(config) {
             check(!rows().length && !highlights().length, 'Synthetic document already shows annotations');
 
             await selectExcerpt();
-            const action = await wait(() => root.querySelector('[data-action="annotate-source"]'), 'annotate selected translation button');
-            const rect = action.getBoundingClientRect();
-            const x = rect.x + rect.width / 2;
-            const y = rect.y + rect.height / 2;
-            check(!action.disabled && action.contains(root.elementFromPoint(x, y)), 'Annotate button is not clickable');
-            let clicks = 0;
-            action.addEventListener('click', () => clicks++);
-            // Dispatch a single Gecko mouse gesture to the UI, including pointer-down dismissal logic.
-            win.windowUtils.sendMouseEvent('mousedown', x, y, 0, 1, 0);
-            win.windowUtils.sendMouseEvent('mouseup', x, y, 0, 1, 0);
-            check(clicks === 1, `Expected one annotate click on the button; got ${clicks}`);
+            const review = await wait(() => root.querySelector('[data-action="review-source-annotation"]'), 'highlight original text');
+            mouseClick(review);
+            const scope = root.querySelector('.mktero-translation-annotation-details[open] .mktero-translation-annotation-text');
+            check(scope?.textContent === fixture.sentences[1] && !rows().length, 'Review must show the exact sentence before saving');
+            mouseClick(root.querySelector('[data-action="annotate-source"]'));
+            await wait(() => rows().length === 1 && highlights().length, 'one durable highlight and sidebar row');
+            check(!hasTemporarySelection(), 'Confirmation left a temporary selection over the highlight');
 
-            try {
-                await wait(() => rows().length && highlights().length, 'saved highlights on translated text and a sidebar row after one click');
-            }
-            catch (error) {
-                const followUp = root.querySelector(
-                    '.mktero-annotation-popup .mktero-related-source-scope, .mktero-annotation-popup .mktero-related-source-create'
-                );
-                throw new Error(`${error.message}; clicks=${clicks}; sidebarRows=${rows().length}; `
-                    + `durableMarks=${highlights().length}; followUpPopup=${Boolean(followUp)}`);
-            }
-            check(rows().length === 1, 'A single click added more than one sidebar row');
-            check(!hasTemporarySelection(), 'The click left a temporary selection over the annotation');
-
-            // Background synchronization can replace a local ID with a PDF key. Sample
-            // the settled backing store (either type) before comparing IDs across views.
             const storedPath = PathUtils.join(config.profile, 'mktero-annotations', 'v1', `item-${pdf.id}.json`);
             const persistedRecords = async () => {
                 const local = await IOUtils.exists(storedPath) ? (await IOUtils.readJSON(storedPath)).annotations : [];
                 await Zotero.Items.loadDataTypes([pdf], ['childItems']);
                 const pdfItems = pdf.getAnnotations(false);
                 if (pdfItems.length) await Zotero.Items.loadDataTypes(pdfItems, ['annotation', 'annotationDeferred']);
-                return [...local.map(({ id, color, text, type }) => ({ id, color, text, type, storage: 'local' })),
-                    ...pdfItems.map(item => ({ id: item.key, color: item.annotationColor,
-                        text: item.annotationText, type: item.annotationType, storage: 'pdf' }))];
+                return [...local.map(({ id, color, text, type, ranges }) => ({ id, color, text, type, ranges, storage: 'local' })),
+                    ...pdfItems.map(item => ({ id: item.key, color: item.annotationColor, text: item.annotationText,
+                        type: item.annotationType, storage: 'pdf', position: JSON.parse(item.annotationPosition) }))];
             };
-            let stableID;
-            let stableSince;
+            const status = root.querySelector('.markdown-reader-action-status');
             const saved = await wait(async () => {
                 const records = await persistedRecords();
-                const id = records.length === 1 && records[0].id === sidebarID() ? records[0].id : null;
-                if (id !== stableID) {
-                    stableID = id;
-                    stableSince = Date.now();
-                }
-                return id && Date.now() - stableSince >= 500 && records[0];
-            }, 'one settled local or PDF annotation matching the sidebar ID');
+                if (records.length !== 1 || records[0].id !== sidebarID()) return false;
+                const record = records[0];
+                if (ambiguous) return record.storage === 'local' && sidebar.querySelector('.markdown-note-sync-retry') && record;
+                return record.storage === 'pdf' && record;
+            }, ambiguous ? 'local-only annotation with retry' : 'Zotero PDF highlight with matching sidebar ID');
             const normalize = text => String(text).replace(/\s+/g, ' ').trim();
             check(saved.type === 'highlight' && saved.color?.toLowerCase() === '#ffd400'
-                && normalize(saved.text) === fixture.markdown, 'Saved highlight must be yellow and attached to the full original block');
+                && normalize(saved.text) === fixture.sentences[1], 'Stored highlight differs from the reviewed sentence');
+            if (ambiguous) {
+                const from = fixture.markdown.indexOf(fixture.sentences[1]);
+                check(saved.ranges?.length === 1 && saved.ranges[0].from === from && saved.ranges[0].to === fixture.markdown.length,
+                    'Local annotation lost its original range');
+                check(/multiple|多处/i.test(sidebar.querySelector('.markdown-note-sync--failed').textContent),
+                    'Sidebar did not identify the ambiguous match');
+                check(!status.hidden && /retry|重试/i.test(status.textContent), 'Local-only outcome missing');
+            }
+            else {
+                const { pageIndex, rects } = saved.position;
+                check(pageIndex === 0 && rects?.length === 1, 'Expected one rectangle on the first PDF page');
+                const [left, bottom, right, top] = rects[0];
+                check(Math.abs(left - 40) < 2 && bottom <= 95 && bottom >= 88 && top >= 99 && top <= 110
+                    && right > 140 && right < 180, `PDF rectangle misses the reviewed sentence: ${rects[0]}`);
+                check(!status.hidden && /Zotero PDF/.test(status.textContent), 'Confirmed PDF outcome missing');
+            }
+
+            // Sample the actual status in a narrow reader with both sidebars hidden.
+            root.querySelector('#mktero-focus-toggle').click();
+            const pane = root.querySelector('.mktero-tab-view');
+            pane.style.maxWidth = '380px';
+            const box = status.getBoundingClientRect();
+            const bounds = pane.getBoundingClientRect();
+            check(pane.classList.contains('is-focus-mode') && bounds.width <= 380 && box.width > 0
+                && box.left >= bounds.left && box.right <= bounds.right && box.bottom <= bounds.bottom
+                && status.scrollWidth <= status.clientWidth + 1 && status.scrollHeight <= status.clientHeight + 1,
+                'Annotation feedback is clipped or hidden in narrow focus mode');
+            pane.style.removeProperty('max-width');
+            root.querySelector('.markdown-focus-exit').click();
 
             // Normalize Gecko's computed color-mix() serialization to rendered sRGB.
             const canvas = doc.createElementNS('http://www.w3.org/1999/xhtml', 'canvas');
@@ -208,7 +218,7 @@ export async function runSmoke(config) {
             const paint = canvas.getContext('2d');
             const views = [];
             for (const view of ['translated', 'original', 'compare', 'translated']) {
-                await stage(`aligned / durable annotation in ${view}`);
+                await stage(`${fixture.kind} / durable annotation in ${view}`);
                 await changeView(view);
                 check(rows().length === 1 && sidebarID() === saved.id,
                     `${view}: expected one sidebar item with ID ${saved.id}; got ${rows().length} (${sidebarID()})`);
@@ -216,7 +226,7 @@ export async function runSmoke(config) {
                 const ids = [...new Set(nodes.map(node => node.getAttribute('data-annotation-id')))];
                 check(ids.length === 1 && ids[0] === saved.id, `${view}: expected inline ID ${saved.id}; got ${ids.join(', ')}`);
                 const text = normalize(nodes.map(node => node.textContent).join(''));
-                const expected = view === 'translated' ? fixture.units.join('') : fixture.markdown;
+                const expected = view === 'translated' ? fixture.units[1] : fixture.sentences[1];
                 check(text === expected, `${view}: expected highlighted text ${JSON.stringify(expected)}; got ${JSON.stringify(text)}`);
                 check(!hasTemporarySelection(), `${view}: temporary selection still visible`);
                 const fills = [...new Set(nodes.map(node => win.getComputedStyle(node).backgroundColor))];
@@ -235,7 +245,7 @@ export async function runSmoke(config) {
             const records = await persistedRecords();
             check(records.length === 1 && records[0].id === saved.id, 'View changes did not preserve a single persisted record');
             check(Services.io.offline, 'Gecko went online during annotation validation');
-            report.push({ fixture: fixture.kind, check: 'durable-annotation', clicks, storage: saved.storage, views, passed: true });
+            report.push({ fixture: fixture.kind, check: 'durable-annotation', storage: saved.storage, position: saved.position, views, passed: true });
         }
     }
     return { mode: 'installed-product-xpi', ...baseReport,

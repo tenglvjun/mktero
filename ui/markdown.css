@@ -1788,9 +1788,9 @@ main {
     border-inline-end: 1px solid var(--border-subtle);
 }
 
-.markdown-reader-action-status:not([hidden]) ~ .markdown-reader-resources,
+.markdown-reader-action-status:not([hidden], [data-annotation-feedback]) ~ .markdown-reader-resources,
 .markdown-reader-resources:not([hidden]) ~ .markdown-reader-action--primary,
-.markdown-reader-action-status:not([hidden])
+.markdown-reader-action-status:not([hidden], [data-annotation-feedback])
     ~ .markdown-reader-action--primary {
     margin-inline-start: 0;
 }
@@ -1806,7 +1806,7 @@ main {
     margin-inline-start: auto;
 }
 
-.markdown-reader-action-status:not([hidden]) ~ .markdown-export-actions,
+.markdown-reader-action-status:not([hidden], [data-annotation-feedback]) ~ .markdown-export-actions,
 .markdown-reader-resources:not([hidden]) ~ .markdown-export-actions,
 .markdown-export-actions:not([hidden]) ~ .markdown-reader-action--primary {
     margin-inline-start: 0;
@@ -3156,9 +3156,26 @@ main {
     white-space: nowrap;
 }
 
-.markdown-reader-action-status:not([hidden])
+.markdown-reader-action-status:not([hidden], [data-annotation-feedback])
     + .markdown-reader-action--primary {
     margin-inline-start: 0;
+}
+
+.markdown-reader-action-status[data-annotation-feedback] {
+    position: absolute;
+    inset-block-start: calc(100% + 4px);
+    inset-inline-end: 8px;
+    max-width: min(46ch, calc(100% - 16px));
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-float);
+    color: var(--text);
+    font: 12px/1.4 var(--ui-font);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    pointer-events: none;
 }
 
 .markdown-snapshot-host,
@@ -6191,6 +6208,21 @@ blockquote.mktero-note,
 .mktero-translation-annotation-details > .mktero-translation-annotation-text {
     max-height: none;
     overflow: visible;
+}
+
+/* A long reading excerpt shares this panel with the confirmation. Leave
+   room for the scope heading and at least one complete line beneath it. */
+.mktero-translation-annotation-details[open] {
+    min-height: 3.4em;
+}
+
+.mktero-translation-annotation-part {
+    display: block;
+    white-space: pre-line;
+}
+
+.mktero-translation-annotation-part + .mktero-translation-annotation-part {
+    margin-block-start: 0.4em;
 }
 
 .mktero-translation-annotation-details > summary {

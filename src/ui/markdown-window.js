@@ -464,6 +464,7 @@ class MarkdownTabView {
         this.documentActionBusy = null;
         this.destroyed = false;
         this.actionStatusTimer = null;
+        this.translatedAnnotationFeedback = null;
         this.warningToastSignature = null;
         this.warningToastTimer = null;
         this.correctionUndoTimer = null;
@@ -739,6 +740,7 @@ class MarkdownTabView {
         this.model = model;
         const elements = this.elements;
         this.syncLocalization();
+        this.syncTranslatedAnnotationFeedback();
         this.syncZoteroNotesAdapter(model);
         if (model.status !== 'ready' || model.renderMode === 'html') {
             this.clearCorrectionUndo();
@@ -955,6 +957,7 @@ class MarkdownTabView {
                 this.renderedChromeRanges = editorChromeRanges;
                 this.editor.setDocument({
                     markdown,
+                    canAnnotateTranslation: typeof model.onCreateMarkdownAnnotation === 'function',
                     annotationOverlay,
                     sourceMap,
                     figureViews,
@@ -1383,16 +1386,26 @@ class MarkdownTabView {
         const creation = ++this.annotationCreationGeneration;
         const selection = this.annotationSelectionGeneration;
         const createAnnotation = this.model.onCreateMarkdownAnnotation;
-        const draft = await this.prepareMarkdownAnnotationDraft(
-            annotation,
-            selectionContext
-        );
-        const saved = await createAnnotation(draft);
+        const feedback = selectionContext?.rangesAreSource === true
+            ? { itemID, localID: null, key: null } : null;
+        if (feedback || this.translatedAnnotationFeedback) this.clearDocumentActionStatus();
+        this.translatedAnnotationFeedback = feedback;
+        let saved;
+        try {
+            const draft = await this.prepareMarkdownAnnotationDraft(annotation, selectionContext);
+            saved = await createAnnotation(draft);
+        }
+        catch (error) {
+            if (this.translatedAnnotationFeedback === feedback) this.translatedAnnotationFeedback = null;
+            throw error;
+        }
         if (this.destroyed || this.model.itemID !== itemID) return saved;
+        if (feedback) feedback.localID = saved.id;
         const selectSaved = creation === this.annotationCreationGeneration
             && selection === this.annotationSelectionGeneration;
         const synchronizedIDs = this.model.onGetSynchronizedAnnotationIDs?.(saved.id) || [];
-        if (!synchronizedIDs.some(id => findOverlayAnnotation(this.model.annotationOverlay, id))) {
+        if (!findOverlayAnnotation(this.model.annotationOverlay, saved.id)
+            && !synchronizedIDs.some(id => findOverlayAnnotation(this.model.annotationOverlay, id))) {
             this.model.annotationOverlay = appendMatchedAnnotation(
                 this.model.annotationOverlay,
                 saved
@@ -1401,6 +1414,34 @@ class MarkdownTabView {
         this.render(this.model);
         if (selectSaved) this.selectCreatedAnnotation(saved.id);
         return saved;
+    }
+
+    syncTranslatedAnnotationFeedback() {
+        const feedback = this.translatedAnnotationFeedback;
+        if (!feedback) return;
+        const { itemID, onGetSynchronizedAnnotationIDs, annotationOverlay } = this.model;
+        if (itemID !== feedback.itemID || this.model.status !== 'ready' || this.model.renderMode === 'html') {
+            this.clearDocumentActionStatus();
+            return;
+        }
+        if (!feedback.localID || feedback.key === 'annotation.translatedSavedPDF') return;
+        // A local row can disappear before its PDF layer refreshes. Only the
+        // published local-to-PDF mapping confirms all parts were synchronized.
+        let key = 'annotation.translatedSavedPending';
+        if (onGetSynchronizedAnnotationIDs?.(feedback.localID)?.length) {
+            key = 'annotation.translatedSavedPDF';
+        }
+        else {
+            const local = findOverlayAnnotation(annotationOverlay, feedback.localID);
+            if (local?.synchronization?.status === 'failed') key = 'annotation.translatedSavedLocal';
+            else if (!local && feedback.key) return;
+        }
+        if (feedback.key === key) return;
+        feedback.key = key;
+        this.setDocumentActionStatus(key, {
+            dismissAfter: key !== 'annotation.translatedSavedPending',
+            translatedAnnotation: feedback,
+        });
     }
 
     resolveVisibleAnnotationID(annotationID, retainSynchronizing = false) {
@@ -4764,8 +4805,10 @@ class MarkdownTabView {
         }
     }
 
-    setDocumentActionStatus(key, { dismissAfter = false } = {}) {
+    setDocumentActionStatus(key, { dismissAfter = false, translatedAnnotation = null } = {}) {
         this.clearDocumentActionStatus();
+        this.translatedAnnotationFeedback = translatedAnnotation;
+        if (translatedAnnotation) this.elements.actionStatus.setAttribute('data-annotation-feedback', 'true');
         this.elements.actionStatus.textContent = this.t(key);
         this.elements.actionStatus.hidden = false;
         if (!dismissAfter || typeof this.ownerWindow.setTimeout !== 'function') {
@@ -4773,8 +4816,7 @@ class MarkdownTabView {
         }
         this.actionStatusTimer = this.ownerWindow.setTimeout(() => {
             this.actionStatusTimer = null;
-            this.elements.actionStatus.textContent = '';
-            this.elements.actionStatus.hidden = true;
+            this.clearDocumentActionStatus();
         }, DOCUMENT_ACTION_STATUS_TIMEOUT_MS);
     }
 
@@ -5236,11 +5278,13 @@ class MarkdownTabView {
     }
 
     clearDocumentActionStatus() {
+        this.translatedAnnotationFeedback = null;
         if (this.actionStatusTimer !== null) {
             this.ownerWindow.clearTimeout?.(this.actionStatusTimer);
             this.actionStatusTimer = null;
         }
         if (!this.elements?.actionStatus) return;
+        this.elements.actionStatus.removeAttribute('data-annotation-feedback');
         this.elements.actionStatus.textContent = '';
         this.elements.actionStatus.hidden = true;
     }

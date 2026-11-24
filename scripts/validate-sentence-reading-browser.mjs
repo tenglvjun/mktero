@@ -182,7 +182,8 @@ const ANNOTATION_TEXT = `${POPUP} .mktero-translation-annotation-text:visible`;
 const SOURCE_MARK = '.cm-mktero-translation-pair-selected-text';
 const ANNOTATE = '[data-action="annotate-source"]:visible';
 const OLD_ALIGNMENT_ACTIONS = '[data-action="enable-alignment"], [data-action="cancel-alignment"]';
-const TOOLBAR_ACTIONS = ['preview-source', 'copy-translation'];
+const REVIEW = 'review-source-annotation';
+const TOOLBAR_ACTIONS = [REVIEW, 'preview-source', 'copy-translation'];
 const settle = page => page.evaluate(() => new Promise(resolve => {
     requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 }));
@@ -196,19 +197,20 @@ function expectPopupWithinColumn(layout, label) {
         `${label}: popup y=${box.top}..${box.bottom} escapes column y=${reading.top}..${reading.bottom}`);
 }
 
-function expectActionsVisible(layout, panel, label, { unavailable = false } = {}) {
+function expectActionsVisible(layout, panel, label, { unavailable = false, legacy = false, reviewable = !unavailable && !legacy } = {}) {
     assert.ok(layout, `${label}: the selection popup must remain open`);
     assert.equal(layout.obsoleteSourceUI, 0, `${label}: removed More controls and panels must not exist, even hidden`);
-    assert.ok(['collapsed', 'preview'].includes(panel), `${label}: only collapsed and preview states are supported`);
-    const previewActions = ['locate-source', ...(!unavailable ? ['annotate-source'] : [])];
-    const expected = [...TOOLBAR_ACTIONS, ...(panel === 'preview' ? previewActions : [])];
+    const expected = TOOLBAR_ACTIONS.filter(name => reviewable || name !== REVIEW);
+    if (panel === 'preview') expected.push('locate-source');
+    if (panel !== 'collapsed' && !unavailable) expected.push('annotate-source');
+    if (panel === 'preview' && legacy) expected.push('include-source-block');
     assert.equal(layout.panel, panel);
     assert.deepEqual(layout.actions.map(action => action.name), expected, `${label}: only the active panel may offer actions`);
     for (const { name, visible } of layout.actions) assert.ok(visible, `${label}: ${name} is obscured`);
     assert.ok(['up', 'down'].includes(layout.expansion), `${label}: popup must declare its expansion direction`);
     if (panel === 'collapsed') return;
-    const action = layout.actions.at(-1);
-    if (!unavailable) {
+    const action = layout.actions.find(item => item.name === (unavailable ? 'locate-source' : 'annotate-source'));
+    if (!unavailable && panel === 'preview') {
         const locate = layout.actions.find(item => item.name === 'locate-source');
         assert.ok(Math.abs(locate.box.y - action.box.y) <= 1,
             `${label}: Locate and Save must share one action row; ${JSON.stringify({ locate: locate.box, save: action.box, popup: layout.box, reading: layout.reading })}`);
@@ -234,7 +236,7 @@ function expectStableToolbar(before, after, label) {
         }
     };
     expectGeometry(before.toolbar, after.toolbar, ['x', 'y', 'height'], 'toolbar');
-    for (const name of TOOLBAR_ACTIONS) {
+    for (const { name } of before.actions.filter(action => TOOLBAR_ACTIONS.includes(action.name))) {
         const previous = before.actions.find(action => action.name === name);
         const current = after.actions.find(action => action.name === name);
         assert.ok(previous && current, `${label}: ${name} must remain in the toolbar`);
@@ -254,17 +256,17 @@ async function expectPreviewSave(page, locale, label) {
     assert.equal(await page.locator(ANNOTATE).textContent(), locale === 'zh-CN' ? '保存到注释' : 'Save to Annotations',
         `${label}: preview save must use the selected UI locale`);
     assert.equal(await page.locator(`${POPUP} [data-action="source-more"]`).count(), 0,
-        `${label}: both view toolbars must only contain View original and Copy translation`);
+        `${label}: obsolete More actions must be absent`);
 }
 
-async function expectAnnotationScope(page, expected, label, { locale, blockCount = 1, scroll = false, geometryPath }) {
+async function expectAnnotationScope(page, expected, label, { locale, legacy = false, multiple = false, scroll = false, geometryPath }) {
     const details = page.locator(`${POPUP} details.mktero-translation-annotation-details`);
     assert.equal(await details.count(), 1, `${label}: complete save scope must use native details`);
     const summary = details.locator('summary.mktero-related-source-scope');
-    assert.equal(await summary.textContent(), locale === 'zh-CN'
-        ? `保存范围：${blockCount} 个完整原文块`
-        : blockCount === 1 ? 'Save scope: one complete original block' : `Save scope: ${blockCount} complete original blocks`,
-    `${label}: save scope label must describe the complete original block count in the selected locale`);
+    const expectedLabel = legacy
+        ? (locale === 'zh-CN' ? '保存范围：1 个完整原文块' : 'Save scope: one complete original block')
+        : (locale === 'zh-CN' ? '保存范围：对应原句' : multiple ? 'Save scope: matching original sentences' : 'Save scope: original sentence');
+    assert.equal(await summary.textContent(), expectedLabel, `${label}: localized scope`);
     assert.equal(await details.getAttribute('open'), null, `${label}: save scope is collapsed initially`);
     assert.equal(await page.locator(ANNOTATION_TEXT).count(), 0, `${label}: complete source is hidden until explicitly expanded`);
     const selected = await page.evaluate(() => reader.selectionSnapshot());
@@ -287,7 +289,7 @@ async function expectAnnotationScope(page, expected, label, { locale, blockCount
             assert.equal(await details.evaluate(node => node.open), expanded, `${label}: native summary ${expanded ? 'expands' : 'collapses'} the save scope`);
             expectStableToolbar(before.layout, current.layout, `${label}: scope ${expanded ? 'expanded' : 'collapsed'}`);
             expectPopupWithinColumn(current.layout, label);
-            expectActionsVisible(current.layout, 'preview', label);
+            expectActionsVisible(current.layout, 'preview', label, { legacy });
             assert.deepEqual(current.selection, selected, `${label}: inspecting save scope preserves the native selection`);
             assert.ok(Math.abs(current.scrollTop - before.scrollTop) <= 1, `${label}: inspecting save scope preserves the reading position`);
             assert.equal(await page.locator(SOURCE_TEXT).textContent(), reading, `${label}: save scope must retain the exact reading excerpt`);
@@ -298,7 +300,7 @@ async function expectAnnotationScope(page, expected, label, { locale, blockCount
                 assert.equal(scope.scrollportOverflowY, 'auto', `${label}: details must be the scrollport`);
                 assert.equal(scope.textOverflowY, 'visible', `${label}: the annotation body must not nest another scrollport`);
                 assert.equal(scope.textMaxHeight, 'none', `${label}: the annotation body must retain its full natural height`);
-                expectActionsVisible(scope, 'preview', `${label}: expanded save scope`);
+                expectActionsVisible(scope, 'preview', `${label}: expanded save scope`, { legacy });
                 if (scroll) assert.ok(scope.scrollRange > 0, `${label}: the complete long save scope must scroll internally`);
                 assert.equal(scope.scrollTop, 0, `${label}: save scope must start at the beginning`);
                 assert.ok(scope.firstLineVisible, `${label}: the complete first scope line must be readable initially; ${JSON.stringify(scope)}`);
@@ -306,13 +308,17 @@ async function expectAnnotationScope(page, expected, label, { locale, blockCount
                     assert.ok(!scope.lastLineVisible, `${label}: overflowing scope must initially hide its last line`);
                     const bottom = await wheelToEdge(page, scope, 1, `${label}: save scope bottom`);
                     geometry.push({ stage: 'scope-bottom', scope: bottom });
-                    assert.ok(!bottom.firstLineVisible && bottom.lastLineVisible, `${label}: scope wheel must reveal the complete last line; ${JSON.stringify(bottom)}`);
-                    expectActionsVisible(bottom, 'preview', `${label}: scrolled save scope`);
+                    assert.ok(bottom.lastLineVisible, `${label}: scope wheel must reveal the complete last line; ${JSON.stringify(bottom)}`);
+                    // The summary scrolls out first. A short body can then fit in full.
+                    if (bottom.textBox.height > bottom.visibleTextBox.height + bottom.sourceLineHeight) {
+                        assert.equal(bottom.firstLineVisible, false, `${label}: an overflowing body must scroll its first line out`);
+                    }
+                    expectActionsVisible(bottom, 'preview', `${label}: scrolled save scope`, { legacy });
                     expectStableToolbar(before.layout, bottom, `${label}: scrolling save scope keeps the toolbar fixed`);
                     const top = await wheelToEdge(page, bottom, -1, `${label}: save scope top`);
                     geometry.push({ stage: 'scope-top', scope: top });
                     assert.ok(top.firstLineVisible, `${label}: scope wheel must return to its complete first line`);
-                    expectActionsVisible(top, 'preview', `${label}: save scope returned to top`);
+                    expectActionsVisible(top, 'preview', `${label}: save scope returned to top`, { legacy });
                     assert.deepEqual(await page.evaluate(() => reader.selectionSnapshot()), selected,
                         `${label}: scrolling save scope preserves the native selection`);
                     assert.ok(Math.abs(await page.evaluate(() => reader.scrollState().scrollTop) - before.scrollTop) <= 1,
@@ -353,8 +359,8 @@ async function checkScopeProbe(page, { view, locale }) {
     await settle(page);
     await clickAction(page, 'preview-source');
     assert.equal(await page.locator(SOURCE_TEXT).textContent(), longSentences[1], 'Reading preview must retain only the exact original sentence');
-    await expectAnnotationScope(page, longSentences.join(' '), 'minimal long scope summary', {
-        locale, scroll: true,
+    await expectAnnotationScope(page, longSentences[1], 'minimal long scope summary', {
+        locale,
         geometryPath: `/tmp/mktero-unified-scope-probe-${process.env.MKTERO_BROWSER}-${view}-${locale}.json`,
     });
 }
@@ -431,7 +437,7 @@ async function checkStablePopup(page, { view, locale }) {
                     if (panel === 'preview') {
                         assert.deepEqual(await page.locator(SOURCE_TEXT).allTextContents(), [longSentences[1]]);
                         await expectPreviewSave(page, locale, transition);
-                        await expectAnnotationScope(page, longSentences.join(' '), transition, { locale });
+                        await expectAnnotationScope(page, longSentences[1], transition, { locale });
                         assert.equal(await page.locator(ANNOTATION_TEXT).count(), 0, `${transition}: save scope is collapsed after inspection`);
                     }
                     else {
@@ -534,7 +540,7 @@ async function checkCompactPopup(page, { selection, expectReading, capture, loca
     assert.ok(short.box.width < desktop.box.width && short.box.height < desktop.box.height,
         `Short popup (${short.box.width}x${short.box.height}) must size to its content rather than match long popup (${desktop.box.width}x${desktop.box.height})`);
     await expectPreviewSave(page, locale, 'desktop preview');
-    await expectAnnotationScope(page, longSentences.join(' '), 'desktop preview', { locale, scroll: true });
+    await expectAnnotationScope(page, longSentences.join(' '), 'desktop preview', { locale, multiple: true, scroll: true });
     if (capture) {
         await page.screenshot({ path: screenshotPaths[view], type: 'png' });
         console.log(`中文${view === 'compare' ? '双语' : '全译文'}原文操作截图：${screenshotPaths[view]}`);
@@ -560,7 +566,7 @@ async function checkCompactPopup(page, { selection, expectReading, capture, loca
     assert.equal(narrow.hostWidth, desktop.hostWidth, 'The viewport and shadow host must not shrink in the narrow case');
     assert.ok(narrow.box.width < desktop.box.width, 'Popup must adapt to the narrowed reading column');
     await expectPreviewSave(page, locale, '320px preview');
-    await expectAnnotationScope(page, longSentences.join(' '), '320px preview', { locale, scroll: true });
+    await expectAnnotationScope(page, longSentences.join(' '), '320px preview', { locale, multiple: true, scroll: true });
     await clickAction(page, 'preview-source');
     expectActionsVisible(await measure(), 'collapsed', 'collapsed after expanded panel');
     // A wheel over the reading surface remains an explicit dismissal, unlike
@@ -667,18 +673,18 @@ async function checkNavigation(page, view, { virtual = false, table = false, dis
     console.log(`${view}：${virtual ? '真实长文虚拟化' : table ? '表格单元格选区' : disjoint ? '不相邻句子独立范围' : '段落选区'}定位原文、精确高亮、返回视图、native selection 与 scrollTop 恢复通过`);
 }
 
-async function checkCompleteSourceSave(page, { locale, source, label }) {
+async function checkSourceSave(page, { locale, source, label, range = { from: 0, to: source.length }, legacy = false }) {
+    if (legacy) await clickAction(page, 'include-source-block');
     const before = await page.evaluate(() => reader.counters());
-    const range = { from: 0, to: source.length };
     const nativeText = visibleMarkdownTextForRanges(source, [range]).trim();
     await expectPreviewSave(page, locale, label);
-    await expectAnnotationScope(page, nativeText, label, { locale });
+    await expectAnnotationScope(page, nativeText, label, { locale, legacy });
     await page.locator(ANNOTATE).click();
     await settle(page);
     const saved = (await page.evaluate(() => reader.counters())).annotations.slice(before.annotations.length);
     assert.equal(saved.length, 1, `${label}: save once`);
     assert.equal(saved[0].annotation.text, nativeText, `${label}: save complete native original text`);
-    assert.deepEqual(saved[0].annotation.ranges, [range], `${label}: save the entire canonical original block`);
+    assert.deepEqual(saved[0].annotation.ranges, [range], `${label}: save the confirmed canonical range`);
     assert.deepEqual(saved[0].selectionContext, { side: 'source', rangesAreSource: true });
     assert.deepEqual(await page.evaluate(() => reader.selectionState()), { text: '', collapsed: true });
 }
@@ -699,7 +705,7 @@ async function checkAnnotationCap(page, { view, locale }) {
             `The ${count}-block test must use a real native selection spanning all translated blocks`);
         await settle(page);
         const compact = await page.evaluate(() => reader.popupLayout());
-        expectActionsVisible(compact, 'collapsed', `${count}-block selection`);
+        expectActionsVisible(compact, 'collapsed', `${count}-block selection`, { unavailable: count > 8 });
         await clickAction(page, 'preview-source');
         try { await page.locator(SOURCE_TEXT).waitFor({ state: 'visible' }); }
         catch (error) {
@@ -750,14 +756,14 @@ async function checkAnnotationCap(page, { view, locale }) {
         }
         else {
             await expectPreviewSave(page, locale, 'eight-block save');
-            await expectAnnotationScope(page, capParagraphs.slice(0, 8).join('\n\n'), 'eight-block complete source scope', { locale, blockCount: 8 });
+            await expectAnnotationScope(page, capParagraphs.slice(0, 8).join(' '), 'eight-block sentence scope', { locale, multiple: true });
             await page.locator(ANNOTATE).click();
             await settle(page);
             const saved = (await page.evaluate(() => reader.counters())).annotations.slice(before.annotations.length);
             assert.equal(saved.length, 1, 'Eight original blocks must produce exactly one annotation');
             assert.deepEqual(saved[0].annotation.ranges, capBlocks.slice(0, 8).map(({ from, to }) => ({ from, to })),
                 'The saved ranges must be the eight complete canonical original blocks');
-            assert.equal(saved[0].annotation.text, capParagraphs.slice(0, 8).join('\n\n'));
+            assert.equal(saved[0].annotation.text, capParagraphs.slice(0, 8).join(' '));
             assert.deepEqual(saved[0].selectionContext, { side: 'source', rangesAreSource: true });
             assert.deepEqual(await page.evaluate(() => reader.selectionState()), { text: '', collapsed: true });
         }
@@ -789,7 +795,7 @@ async function checkView(browser, view, locale, capture) {
         const texts = page.locator(SOURCE_TEXT);
         const marks = page.locator(SOURCE_MARK);
         const row = page.locator('.mktero-translation-legacy-block:visible');
-        const selection = async (text, from, to, backward = false, selector) => {
+        const selection = async (text, from, to, backward = false, selector, reviewable = true) => {
             if (!selector) {
                 await page.evaluate(text => reader.scrollToText(text), text);
                 await settle(page);
@@ -799,7 +805,7 @@ async function checkView(browser, view, locale, capture) {
             // Native selectionchange is asynchronous; never dispatch editor
             // events or call the runtime hit-test helpers to fake selection.
             await settle(page);
-            expectActionsVisible(await page.evaluate(() => reader.popupLayout()), 'collapsed', 'new translated selection');
+            expectActionsVisible(await page.evaluate(() => reader.popupLayout()), 'collapsed', 'new translated selection', { reviewable });
             assert.equal(await texts.count(), 0, 'Default popup must not expose original text');
             assert.equal(await page.locator(ANNOTATE).count(), 0, 'Default popup must not offer save');
             assert.equal(await page.locator('[data-action="show-source-block"]:visible').count(), 0, 'Legacy access must be inside the preview');
@@ -819,7 +825,7 @@ async function checkView(browser, view, locale, capture) {
             await row.waitFor({ state: 'visible' });
             assert.equal(await row.getAttribute('data-translation-block-id'), id, label);
             await expectReading();
-            assert.deepEqual(await row.locator('button').evaluateAll(buttons => buttons.map(button => button.dataset.action)),
+            assert.deepEqual(await row.locator('button:visible').evaluateAll(buttons => buttons.map(button => button.dataset.action)),
                 ['show-source-block'], label);
             assert.equal(await page.locator(`${ANNOTATE}, [data-action="locate-source"]:visible`).count(), 0, label);
             assert.equal(await page.locator(OLD_ALIGNMENT_ACTIONS).count(), 0, label);
@@ -838,8 +844,8 @@ async function checkView(browser, view, locale, capture) {
         const first = paragraph.indexOf('下降');
         await selection(paragraph, first, first + 2);
         assert.deepEqual(await page.locator('.mktero-translation-source-toolbar button').allTextContents(),
-            locale === 'zh-CN' ? ['查看原文', '复制译文'] : ['View original', 'Copy translation'],
-            'Both compact toolbars must use the selected UI locale and the same two actions');
+            locale === 'zh-CN' ? ['标注对应原句', '查看原文', '复制译文'] : ['Highlight original text', 'View original', 'Copy translation'],
+            'Both compact toolbars must use the selected UI locale');
         await expectPreviewControl(page, locale, false, 'localized compact toolbar');
         const second = paragraph.indexOf('下降', first + 1);
         const third = paragraph.indexOf(chinese[2]);
@@ -859,7 +865,7 @@ async function checkView(browser, view, locale, capture) {
         await expectReading();
         assert.equal(await page.locator(POPUP).count(), 0, 'Clearing the native selection must dismiss the popup');
 
-        await selection(unalignedChinese, 0, 2);
+        await selection(unalignedChinese, 0, 2, false, undefined, false);
         await expectWholeBlockAction(unaligned.id, 'unaligned paragraph');
         await expectReading(unalignedSource);
         await expectNoRequests();
@@ -891,26 +897,30 @@ async function checkView(browser, view, locale, capture) {
         await settle(page);
         await expectNoRequests();
 
-        // Reading shows the matched sentence; saving in either view uses the
-        // complete canonical original block through the same preview action.
+        // Review a partial translation, then confirm its exact canonical sentence.
         await selection(paragraph, second, second + 2);
         await clickAction(page, 'copy-translation');
         assert.deepEqual((await page.evaluate(() => reader.counters())).copies, ['下降'], 'Copy must use the host callback with the selected translation');
         expectActionsVisible(await page.evaluate(() => reader.popupLayout()), 'collapsed', 'after copy');
-        await clickAction(page, 'preview-source');
-        await expectReading(sentences[1]);
-        await expectPreviewSave(page, locale, 'whole paragraph preview save');
-        expectActionsVisible(await page.evaluate(() => reader.popupLayout()), 'preview', 'whole paragraph preview actions');
-        await expectAnnotationScope(page, sentences.join(' '), 'whole paragraph save scope', { locale });
-        await expectReading(sentences[1]);
-        await page.locator(ANNOTATE).click();
+        const selected = await page.evaluate(() => reader.selectionSnapshot());
+        const review = page.locator(`${POPUP} [data-action="${REVIEW}"]`);
+        await review.focus();
+        await review.press('Enter');
+        await settle(page);
+        expectActionsVisible(await page.evaluate(() => reader.popupLayout({ saveScope: true })), 'review', 'review original sentence');
+        assert.deepEqual(await page.evaluate(() => reader.selectionSnapshot()), selected);
+        assert.equal(await page.locator(ANNOTATION_TEXT).textContent(), sentences[1]);
+        assert.equal(await page.locator(SOURCE_TEXT).count(), 0, 'The sentence is displayed once');
+        assert.deepEqual((await page.evaluate(() => reader.counters())).annotations, []);
+        await page.locator(ANNOTATE).focus();
+        await page.locator(ANNOTATE).press('Space');
         await settle(page);
         const { annotations, translation } = await page.evaluate(() => reader.counters());
         assert.equal(translation, 0);
         assert.equal(annotations.length, 1, 'One click must save exactly one annotation');
         const [{ annotation, selectionContext }] = annotations;
-        assert.deepEqual(annotation.ranges, [{ from: aligned.from, to: aligned.to }]);
-        assert.equal(annotation.text, sentences.join(' '));
+        assert.deepEqual(annotation.ranges, [{ from: source.indexOf(sentences[1]), to: source.indexOf(sentences[1]) + sentences[1].length }]);
+        assert.equal(annotation.text, sentences[1]);
         assert.deepEqual(selectionContext, { side: 'source', rangesAreSource: true });
         assert.equal(await page.locator('[role="dialog"]').count(), 0, 'No follow-up dialog after saving');
         assert.deepEqual(await page.evaluate(() => reader.selectionState()), { text: '', collapsed: true });
@@ -918,17 +928,17 @@ async function checkView(browser, view, locale, capture) {
         assert.equal(await page.locator('.cm-mktero-selection-retained').count(), 0, 'No retained selection after saving');
 
         for (const fixture of structures) {
-            const selectPart = ({ text, selector }) => selection(text, 1, 3, false, selector);
+            const selectPart = ({ text, selector }, reviewable = true) => selection(text, 1, 3, false, selector, reviewable);
             await page.evaluate(options => reader.setDocument(options), { ...fixture.wholeBlock, view });
             await settle(page);
-            await selectPart(fixture.reorderedSelection);
+            await selectPart(fixture.reorderedSelection, false);
             await expectWholeBlockAction(fixture.id, `reordered ${fixture.kind}`);
             assert.deepEqual((await marks.allTextContents()).map(text => fixture.kind === 'list'
                 ? text.replace(/^•?\s*/u, '') : text), view === 'compare' ? fixture.visibleSource : []);
             assert.deepEqual(await texts.allTextContents(), [visibleMarkdownTextForRanges(fixture.source,
                 [{ from: 0, to: fixture.source.length }]).trim()],
             'Explicit whole-block preview must show the complete native original text');
-            await checkCompleteSourceSave(page, { view, locale, source: fixture.source, label: `legacy ${fixture.kind} save` });
+            await checkSourceSave(page, { legacy: true, locale, source: fixture.source, label: `legacy ${fixture.kind} save` });
 
             await page.evaluate(options => reader.setDocument(options), { ...fixture.verified, view });
             await settle(page);
@@ -938,9 +948,12 @@ async function checkView(browser, view, locale, capture) {
                 await expectReading(selected.original);
                 assert.equal(await row.count(), 0, `Verified ${fixture.kind} selection must use its ID`);
             }
-            if (fixture.kind === 'table') await checkCompleteSourceSave(page, {
-                view, locale, source: fixture.source, label: 'verified table native original save',
-            });
+            if (fixture.kind === 'table') {
+                const text = fixture.selections.at(-1).original;
+                const from = fixture.source.indexOf(text);
+                await checkSourceSave(page, { locale, source: fixture.source, range: { from, to: from + text.length },
+                    label: 'verified table cell save' });
+            }
         }
         await page.evaluate(options => reader.setDocument(options), { ...groupedDocument, view });
         await settle(page);

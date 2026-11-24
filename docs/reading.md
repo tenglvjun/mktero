@@ -120,7 +120,7 @@ Dotted identifiers such as section numbers, model versions and decimals stay tog
 
 In `Translation` and on the translated side of `Bilingual`:
 
-1. Select translated text. Both views use the same compact toolbar with only `View original` and `Copy translation`.
+1. Select translated text. Choose `Highlight original text` to review a verified, savable match. You can also choose `View original` or `Copy translation`.
 2. Choose `View original` to expand a preview beside the selection. It lists the matched original sentences once each, in reading order, while keeping temporary markers in the body that show the source relationship. Long previews have a limited height and scroll within the panel. Previewing and these temporary markers do not create annotations.
 3. Choose `Locate original text` to read the source in context. From `Translation`, this switches directly to `Original` and scrolls to the corresponding sentences; from `Bilingual`, it locates the original in the current view. Only verified original sentence ranges receive a temporary highlight. Separate fragments stay separate, without highlighting the text between them; Mktero does not guess source positions.
 4. Use the on-screen `Return to translation` action to restore the view, reading position, and translated text selection you started with.
@@ -131,9 +131,9 @@ Viewing the original, copying the translation, and navigating there and back all
 
 **Save the matching original sentences.**
 
-In both views, choose `Save to Annotations` in the original preview. Even a partial translated selection saves the complete original sentence or sentence group. Expand the save scope to review the exact text. For an unaligned passage with a known original block, open the block and explicitly include it in the save. You can save from up to eight original blocks at once.
+Choose `Highlight original text` to see exactly what will be highlighted. Selecting part of a translated sentence includes its entire original sentence or sentence group. Choose `Save to Annotations` to confirm, or press Esc to cancel. For a passage with only a block-level match, use `View original`, show the block, then explicitly include it to add it to the scope. You can save from up to eight original blocks at once.
 
-Separate original fragments keep their own ranges. Mktero locates each fragment in the PDF before creating the Zotero highlights. If any fragment cannot be located reliably, the annotation stays visible in Markdown with its synchronization status.
+Separate original fragments keep their own ranges. Mktero saves the annotation locally while it locates the original in the PDF. Once all fragments have a Zotero annotation, the reader confirms the PDF save. If a match fails, open `Annotations` to see the reason and retry.
 
 After saving, the corresponding translated passage is highlighted, and the left column's `Annotations` segment lists the same annotation. Switching between Original, Translation, and Bilingual does not create another copy. Annotations stay anchored to the source for PDF location. An existing annotation without a reliable match in the translation stays in the sidebar, but no translated text is highlighted for it.
 

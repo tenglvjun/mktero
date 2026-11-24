@@ -203,7 +203,7 @@ export function popupLayout({ saveScope = false } = {}) {
     const popup = root.querySelector('.mktero-translation-source-popup');
     if (!popup) return null;
     const panel = popup.querySelector('.mktero-translation-source').dataset.panel;
-    const text = panel === 'preview' ? popup.querySelector(saveScope
+    const text = panel !== 'collapsed' ? popup.querySelector(saveScope
         ? '.mktero-translation-annotation-details[open] .mktero-translation-annotation-text'
         : '.mktero-translation-source-text') : null;
     const reading = root.querySelector('.markdown-editor-host').getBoundingClientRect();

@@ -54,6 +54,26 @@ const annotation = {
 };
 const selectionContext = { side: 'source', rangesAreSource: true };
 
+test('reviews the exact annotation text before saving once from the compact toolbar', async t => {
+    const saved = [];
+    const f = fixture(t, { createMarkdownAnnotation: draft => saved.push(draft), copyTranslation() {} });
+    f.open({ source, annotation, selectionContext, translatedText: '译文', hasMappedSentences: true });
+    assert.deepEqual(visibleActions(f.parent), ['review-source-annotation', 'preview-source', 'copy-translation']);
+    const review = f.action('review-source-annotation');
+    assert.equal(review.textContent, '标注对应原句');
+    review.click();
+    review.click();
+    assert.deepEqual(saved, []);
+    assert.equal(f.query('.mktero-translation-annotation-details').open, true);
+    assert.equal(f.query('.mktero-translation-annotation-text').textContent, annotation.text);
+    assert.equal(f.query('.mktero-translation-source-text'), null);
+    const confirm = f.action('annotate-source');
+    confirm.click();
+    confirm.click();
+    await flush();
+    assert.deepEqual(saved, [annotation]);
+});
+
 test('opens only the compact toolbar without source text, scope or save controls', t => {
     const f = fixture(t, {
         copyTranslation: () => assert.fail('copy needs a click'),

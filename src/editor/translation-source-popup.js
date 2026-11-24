@@ -33,6 +33,9 @@ export function createTranslationSourcePopup(parent, {
             anchor,
             source,
             translatedText = '',
+            hasMappedSentences = false,
+            annotationParts = [],
+            excludedText = '',
             locateSource = null,
             previewExpanded = false,
             annotation = null,
@@ -48,6 +51,9 @@ export function createTranslationSourcePopup(parent, {
                 source,
                 text: String(source?.text || ''),
                 hasSentenceGroup: source?.hasSentenceGroup === true,
+                hasMappedSentences,
+                annotationParts,
+                excludedText,
                 translatedText: typeof translatedText === 'string' ? translatedText : '',
                 locateSource,
                 annotation,
@@ -109,6 +115,8 @@ function createContent(document, t, initialOptions, {
     const toolbar = createElement(document, 'div', 'mktero-translation-source-toolbar');
     toolbar.setAttribute('role', 'toolbar');
     toolbar.setAttribute('aria-label', t('ai.translationSourceActions'));
+    const reviewButton = createButton(document, 'review-source-annotation');
+    reviewButton.textContent = t('ai.translationSourceReviewAnnotation');
     const previewButton = createButton(document, 'preview-source');
     previewButton.append(
         document.createTextNode(t('ai.translationSourcePreview')),
@@ -128,15 +136,17 @@ function createContent(document, t, initialOptions, {
     const canUse = button => button.isConnected && !button.disabled && isCurrent();
     const hasPreview = () => Boolean(options.text.trim() || options.wholeBlocks.length
         || options.annotation || options.annotationUnavailable || options.sourceUnavailable);
+    const canReview = () => options.hasMappedSentences && options.annotation
+        && !options.annotationUnavailable && typeof createMarkdownAnnotation === 'function';
     const saving = new Set();
     const guardedWholeBlocks = () => options.wholeBlocks.map(action => ({
         ...action,
         onShowBlock: () => {
-            if (saving.has(options.annotation) || panel !== 'preview' || !isCurrent()) return;
+            if (saving.has(options.annotation) || !panel || !isCurrent()) return;
             return action.onShowBlock();
         },
         onToggleInclude: action.onToggleInclude && (() => {
-            if (!saving.has(options.annotation) && panel === 'preview' && isCurrent()) action.onToggleInclude();
+            if (!saving.has(options.annotation) && panel && isCurrent()) action.onToggleInclude();
         }),
     }));
 
@@ -170,7 +180,7 @@ function createContent(document, t, initialOptions, {
             body.tabIndex = 0;
             details.append(scope, body);
             details.addEventListener('toggle', () => {
-                if (preview.details !== details || panel !== 'preview' || !isCurrent()) return;
+                if (preview.details !== details || !panel || !isCurrent()) return;
                 reposition();
                 if (details.open) {
                     // Native details may preserve a scroll offset while its flex
@@ -180,6 +190,7 @@ function createContent(document, t, initialOptions, {
                 }
             });
             const save = createSourceBlockAnnotationAction(document, t);
+            details.open = panel === 'review';
             save.button.dataset.action = 'annotate-source';
             save.button.classList.add('mktero-translation-source-action');
             preview.element.insertBefore(details, preview.actions);
@@ -191,11 +202,18 @@ function createContent(document, t, initialOptions, {
         preview.scope.textContent = t(options.saveScope || (options.blockCount > 1
             ? 'ai.translationSourceSaveScopePlural' : 'ai.translationSourceSaveScope'),
         { count: options.blockCount });
-        preview.annotationBody.textContent = String(options.annotation.text || '');
+        if (panel === 'review' && options.annotationParts.length > 1) {
+            preview.annotationBody.replaceChildren(...options.annotationParts.map(text => {
+                const part = createElement(document, 'span', 'mktero-translation-annotation-part');
+                part.textContent = text;
+                return part;
+            }));
+        }
+        else preview.annotationBody.textContent = String(options.annotation.text || '');
         const save = preview.save;
         const currentPanelRevision = panelRevision;
         const saveIsCurrent = () => preview.save === save
-            && panel === 'preview' && currentPanelRevision === panelRevision && isCurrent();
+            && panel && currentPanelRevision === panelRevision && isCurrent();
         save.update({
             annotation: options.annotation,
             selectionContext: options.selectionContext,
@@ -225,11 +243,14 @@ function createContent(document, t, initialOptions, {
         if (!preview) return;
         const { body, label, actions, locate, unavailable } = preview;
         const hasText = Boolean(options.text.trim());
-        label.textContent = t(options.hasSentenceGroup
-            ? 'ai.translationSourceGroupLabel' : 'ai.translationSourceLabel');
-        if (body.textContent !== options.text) previewNeedsScrollReset = true;
-        body.textContent = options.text;
-        if (hasText) {
+        // The review's details contain precisely the text that will be saved.
+        // Keep any inspected but still excluded whole blocks visibly separate.
+        const bodyText = panel === 'review' ? options.excludedText : options.text;
+        label.textContent = panel === 'review' ? t('ai.translationSourceExcluded')
+            : t(options.hasSentenceGroup ? 'ai.translationSourceGroupLabel' : 'ai.translationSourceLabel');
+        if (body.textContent !== bodyText) previewNeedsScrollReset = true;
+        body.textContent = bodyText;
+        if (bodyText.trim()) {
             if (label.parentNode !== preview.element) preview.element.insertBefore(label, actions);
             if (body.parentNode !== preview.element) preview.element.insertBefore(body, actions);
         }
@@ -237,7 +258,7 @@ function createContent(document, t, initialOptions, {
             label.remove();
             body.remove();
         }
-        const canLocate = hasText && (typeof options.locateSource === 'function'
+        const canLocate = panel !== 'review' && hasText && (typeof options.locateSource === 'function'
             || typeof revealSource === 'function');
         if (canLocate && locate.parentNode !== actions) actions.prepend(locate);
         else if (!canLocate) locate.remove();
@@ -260,7 +281,7 @@ function createContent(document, t, initialOptions, {
     };
 
     const resetPreviewScroll = () => {
-        if (!previewNeedsScrollReset || !element.isConnected || panel !== 'preview') return;
+        if (!previewNeedsScrollReset || !element.isConnected || !panel) return;
         // Gecko can restore the old scroll frame onto newly mounted source text.
         // Flush that layout before explicitly starting the new excerpt at its beginning.
         preview.body.getBoundingClientRect();
@@ -294,16 +315,22 @@ function createContent(document, t, initialOptions, {
     };
 
     const render = () => {
-        if (panel === 'preview' && !hasPreview()) {
+        if (panel === 'review' && !canReview()) {
+            panel = 'preview';
+            panelRevision++;
+        }
+        if (panel && !hasPreview()) {
             panel = null;
             panelRevision++;
         }
-        if (panel === 'preview' && !preview) createPreview();
+        if (panel && !preview) createPreview();
         refreshPreview();
-        if (preview) preview.element.hidden = panel !== 'preview';
+        if (preview) preview.element.hidden = !panel;
         element.dataset.panel = panel || 'collapsed';
+        reviewButton.setAttribute('aria-expanded', String(panel === 'review'));
         previewButton.setAttribute('aria-expanded', String(panel === 'preview'));
         const buttons = [
+            canReview() ? reviewButton : null,
             hasPreview() ? previewButton : null,
             typeof copyTranslation === 'function' && options.translatedText.trim() ? copyButton : null,
         ].filter(Boolean);
@@ -315,8 +342,20 @@ function createContent(document, t, initialOptions, {
         resetPreviewScroll();
     };
 
+    reviewButton.addEventListener('click', () => {
+        if (!canUse(reviewButton) || !canReview() || saving.has(options.annotation)) return;
+        if (panel !== 'review') {
+            panel = 'review';
+            panelRevision++;
+            render();
+        }
+        preview.details.open = true;
+        preview.scope.focus({ preventScroll: true });
+        reposition();
+    });
     previewButton.addEventListener('click', () => {
         if (!canUse(previewButton)) return;
+        if (panel === 'review' && preview?.details) preview.details.open = false;
         panel = panel === 'preview' ? null : 'preview';
         panelRevision++;
         render();

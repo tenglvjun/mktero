@@ -22,6 +22,7 @@ import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
 import {
     noteSegmentTextKey,
     visibleMarkdownTextForRanges,
+    visibleMarkdownTextPartsForRanges,
 } from '../markdown/markdown-visible-text.js';
 import {
     computeDocumentFigures,
@@ -1548,7 +1549,8 @@ export function createInlineMarkdownEditor({
         const unique = new Map(excerpts.map(excerpt => [
             `${excerpt.sourceFrom}:${excerpt.sourceTo}`, excerpt,
         ]));
-        active.excerpts = [...unique.values()].sort((left, right) => left.sourceFrom - right.sourceFrom);
+        active.excerpts = [...unique.values()].sort((left, right) => left.sourceFrom - right.sourceFrom)
+            .map(excerpt => ({ ...excerpt, text: sourceExcerptText(excerpt.id, excerpt.sourceFrom, excerpt.sourceTo) }));
         const includedBlocks = active.unaligned.filter(pair => active.included.has(pair.id));
         active.source = resolveTranslationAnnotation(active.hits, includedBlocks,
             active.excerpts);
@@ -1588,11 +1590,11 @@ export function createInlineMarkdownEditor({
                 active.shown.add(pair.id);
                 updateTranslationSelection(active);
             },
-            onToggleInclude: () => {
+            onToggleInclude: canSaveTranslation && (() => {
                 if (!isCurrent()) return;
                 if (!active.included.delete(pair.id)) active.included.add(pair.id);
                 updateTranslationSelection(active);
-            },
+            }),
         }));
         const source = active.excerpts.length ? {
             ...active.excerpts[0], text: resolved.text, blocks: active.excerpts, isCurrent,
@@ -1603,7 +1605,11 @@ export function createInlineMarkdownEditor({
             anchor,
             source,
             translatedText: active.translatedText,
-            annotation: resolved.annotation,
+            hasMappedSentences: active.hits.length > 0,
+            annotationParts: resolved.parts,
+            excludedText: active.excerpts.filter(({ id }) => active.shown.has(id) && !active.included.has(id))
+                .map(excerpt => excerpt.text).join('\n\n'),
+            annotation: canSaveTranslation ? resolved.annotation : null,
             annotationUnavailable: resolved.annotationUnavailable,
             selectionContext: resolved.selectionContext,
             blockCount: resolved.blockCount,
@@ -1644,9 +1650,18 @@ export function createInlineMarkdownEditor({
         }
         const blockCount = new Set(selected.map(excerpt => excerpt.id)).size;
         const overCap = blockCount > MAX_TRANSLATED_SELECTION_BLOCKS;
-        const text = overCap ? '' : visibleMarkdownTextForRanges(
+        const parts = overCap ? [] : visibleMarkdownTextPartsForRanges(
             currentTranslationSourceMarkdown, ranges
-        ).trim();
+        );
+        // The persisted text trims only the outer whitespace. Retain the
+        // boundaries and exact separators of the same quotation for review.
+        while (parts.length && !parts[0].trim()) parts.shift();
+        while (parts.length && !parts.at(-1).trim()) parts.pop();
+        if (parts.length) {
+            parts[0] = parts[0].trimStart();
+            parts[parts.length - 1] = parts.at(-1).trimEnd();
+        }
+        const text = parts.join('');
         let saveScope = hits.some(excerpt => excerpt.sourceKind === 'sentence-group')
             ? 'ai.translationSourceSaveGroup' : 'ai.translationSourceSaveSentence';
         if (saveScope === 'ai.translationSourceSaveSentence' && ranges.length > 1) {
@@ -1657,10 +1672,9 @@ export function createInlineMarkdownEditor({
             ? 'ai.translationSourceSaveScopePlural' : 'ai.translationSourceSaveScope';
         return {
             blockCount,
+            parts,
             saveScope,
-            text: excerpts.map(({ id, sourceFrom, sourceTo }) => (
-                sourceExcerptText(id, sourceFrom, sourceTo)
-            )).filter(Boolean).join('\n\n'),
+            text: excerpts.map(excerpt => excerpt.text).filter(Boolean).join('\n\n'),
             annotation: text ? {
                 source: 'markdown',
                 type: 'highlight',
@@ -1977,6 +1991,7 @@ export function createInlineMarkdownEditor({
     let currentTranslationPairs = [];
     let currentTranslationMarkdown = '';
     let currentTranslationSourceMarkdown = '';
+    let canSaveTranslation = Boolean(saveSelectionAnnotation);
     // Reused so that "no overlay" keeps one identity and the rendering field
     // can skip the rebuild it would otherwise trigger on every model update.
     let sharedEmptyAnnotationOverlay = null;
@@ -2001,6 +2016,7 @@ export function createInlineMarkdownEditor({
         translationFailures,
         translationPairs,
         translationView = 'original',
+        canAnnotateTranslation = Boolean(saveSelectionAnnotation),
         sourceMarkdown = '',
         translateOriginalBlockText: nextTranslateOriginalBlockText,
         revealTranslationSource: nextRevealTranslationSource,
@@ -2123,6 +2139,8 @@ export function createInlineMarkdownEditor({
             || currentTranslationSourceMarkdown !== sourceValue)) {
             clearTranslationReturn();
         }
+        const capabilityChanged = canSaveTranslation !== canAnnotateTranslation;
+        canSaveTranslation = canAnnotateTranslation;
         const keepTranslationSelection = activeTranslationSelection && !documentChanged
             && currentTranslationView === nextTranslationView
             && currentTranslationSourceMarkdown === sourceValue
@@ -2195,6 +2213,9 @@ export function createInlineMarkdownEditor({
         if (value === view.state.doc.toString()) {
             sameTextRefreshAt = editorClock();
             view.dispatch({ effects });
+            if (capabilityChanged && keepTranslationSelection && translationSourcePopup.isOpen()) {
+                renderTranslationSelection(activeTranslationSelection);
+            }
             return;
         }
         // Mapping a selection through a whole-document replacement would
