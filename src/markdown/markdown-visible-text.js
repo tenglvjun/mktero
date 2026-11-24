@@ -282,8 +282,29 @@ export function noteMathSegmentsForRanges(
     ranges,
     { analyses = null } = {}
 ) {
+    let checked = 0;
+    const segments = selectionMathSegmentsForRanges(markdown, ranges, {
+        analyses,
+        includeTableCells: false,
+        prepareMath: (tex, display) => checked++ < MAX_NOTE_FORMULAS ? zoteroNoteMathSource(tex, display) : null,
+    });
+    if (!segments) return null;
+    // A caption selection saves the undone TeX. Keep it beside the doubled
+    // source so either saved text still names this passage.
+    const raw = noteMathSegmentsText(segments);
+    const reader = unescapeImageMathText(raw);
+    if (reader !== raw) segments.readerSavedText = reader;
+    return segments;
+}
+
+// Keep the boundaries of the formulas the reader shows. Text between them
+// uses the same visible characters and separators as the selected passage.
+export function selectionMathSegmentsForRanges(markdown, ranges, {
+    analyses = null, prepareMath = null, includeTableCells = true,
+} = {}) {
     const source = String(markdown || '');
-    if (!Array.isArray(ranges) || !ranges.length) return null;
+    if (!Array.isArray(ranges) || !ranges.some(range => validSourceRange(range, source.length)
+        && /[$\\]/u.test(source.slice(range.from, range.to)))) return null;
     const index = visibleIndexFor(source, analyses);
     const segments = [];
     const pushText = text => {
@@ -296,25 +317,19 @@ export function noteMathSegmentsForRanges(
         const last = segments.at(-1);
         return last?.type === 'text' ? last.text : '';
     };
-    let formulaCount = 0;
     let previous = null;
     for (const range of ranges) {
         if (!validSourceRange(range, source.length)) continue;
         const parts = [];
         let cursor = range.from;
-        for (const formula of index.formulasInRange(range.from, range.to)) {
-            // Every formula checked counts, typeset or not, so a passage of
-            // broken TeX cannot run KaTeX without end. An image description
-            // doubles every backslash; the reader typesets the undone form.
-            // `source` stays doubled so a highlight saved from the alt still
-            // matches. Feeding the doubled form to KaTeX makes a leading
-            // doubled backslash a row break and drops the command.
+        const cellFormulas = includeTableCells ? htmlTableFormulasForRange(source, range) : null;
+        for (const formula of cellFormulas ?? index.formulasInRange(range.from, range.to)) {
+            // An image description doubles every backslash. Keep the source
+            // spelling for quote matching and the reader spelling for display.
             const readerTex = index.insideImage(formula.from, formula.to)
                 ? unescapeImageMathText(formula.tex)
                 : formula.tex;
-            const tex = formulaCount++ < MAX_NOTE_FORMULAS
-                ? zoteroNoteMathSource(readerTex, formula.display)
-                : null;
+            const tex = prepareMath ? prepareMath(readerTex, formula.display) : readerTex;
             if (cursor < formula.from) {
                 parts.push({ type: 'text', range: { from: cursor, to: formula.from } });
             }
@@ -362,13 +377,7 @@ export function noteMathSegmentsForRanges(
         previous = range;
     }
     if (!segments.some(segment => segment.type === 'math')) return null;
-    const trimmed = trimNoteSegments(segments);
-    // A caption selection saves the undone TeX. Keep it beside the doubled
-    // source so either saved text still names this passage.
-    const raw = noteMathSegmentsText(trimmed);
-    const reader = unescapeImageMathText(raw);
-    if (reader !== raw) trimmed.readerSavedText = reader;
-    return trimmed;
+    return trimNoteSegments(segments);
 }
 
 // The text a reader saw for `segments`: each formula as the TeX the source
@@ -428,10 +437,16 @@ let htmlTableBlockCache = null;
 // `{ citations(), footnotes() }`. The reader already holds them for the text it
 // shows; without them the first selection in a long paper reparses every
 // citation on mouseup.
-export function visibleMarkdownTextForRanges(markdown, ranges, { analyses = null } = {}) {
+export function visibleMarkdownTextForRanges(markdown, ranges, options) {
+    return visibleMarkdownTextPartsForRanges(markdown, ranges, options).join('');
+}
+
+// Each part carries its original separator. A review can lay disjoint
+// ranges out separately while quoting exactly the same text as the store.
+export function visibleMarkdownTextPartsForRanges(markdown, ranges, { analyses = null } = {}) {
     const source = String(markdown || '');
-    if (!Array.isArray(ranges)) return '';
-    return joinedRangeText(source, visibleIndexFor(source, analyses), ranges);
+    if (!Array.isArray(ranges)) return [];
+    return rangeTextParts(source, visibleIndexFor(source, analyses), ranges);
 }
 
 // Selections used to hide the `_` of a formula the Markdown parser paired
@@ -450,25 +465,25 @@ export function legacyMathEmphasisVisibleTextForRanges(markdown, ranges) {
         legacyMathEmphasisIndexCache.clear();
         legacyMathEmphasisIndexCache.set(source, index);
     }
-    return joinedRangeText(source, index, ranges);
+    return rangeTextParts(source, index, ranges).join('');
 }
 
-function joinedRangeText(source, index, ranges) {
-    let text = '';
+function rangeTextParts(source, index, ranges) {
+    const parts = [];
     let previous = null;
     for (const range of ranges) {
-        const part = visibleRangeText(source, index, range);
+        let part = visibleRangeText(source, index, range);
         if (!part) continue;
-        if (text
+        if (parts.length
             && needsSegmentSeparator(source, index, previous, range)
-            && !/\s$/u.test(text)
+            && !/\s$/u.test(parts.at(-1))
             && !/^\s/u.test(part)) {
-            text += ' ';
+            part = ' ' + part;
         }
-        text += part;
+        parts.push(part);
         previous = range;
     }
-    return text;
+    return parts;
 }
 
 // Selections used to re-parse each slice on its own and joined segments
@@ -590,10 +605,25 @@ export function htmlCellTypesetFormulas(source, atoms) {
                         }
                     }
                 }
-                formulas.push({ startIndex, endIndex, delimiters });
+                formulas.push({ startIndex, endIndex, delimiters, tex: match.text });
             }
         }
         first = last + 1;
+    }
+    return formulas;
+}
+
+function htmlTableFormulasForRange(source, range) {
+    const block = htmlTableBlockContaining(source, range.from, range.to);
+    if (!block) return null;
+    const table = source.slice(block.from, block.to);
+    const formulas = [];
+    for (const { atoms } of htmlTableSourceCells(table)) {
+        for (const { startIndex, endIndex, tex } of htmlCellTypesetFormulas(table, atoms)) {
+            const from = block.from + atoms[startIndex].from;
+            const to = block.from + atoms[endIndex].to;
+            if (from >= range.from && to <= range.to) formulas.push({ from, to, tex, display: false });
+        }
     }
     return formulas;
 }

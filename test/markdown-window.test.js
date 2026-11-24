@@ -2227,8 +2227,10 @@ test('updates Markdown and PDF annotations as one editor document', () => {
 
     assert.deepEqual(updates, [{
         markdown: 'Important result.',
+        canAnnotateTranslation: false,
         annotationOverlay,
         sourceMap,
+        originalSourceMap: sourceMap,
         chromeRanges: [],
         documentTitle: 'Converting PDF…',
         sourceActionRanges: null,
@@ -10295,6 +10297,163 @@ function createAnnotationWindow(changes = {}, options = {}) {
     });
     return { view, shadow, model, created, editorOptions };
 }
+
+test('republishes translated write capability when the host enables or removes annotation creation', t => {
+    const model = createModel({ status: 'ready', markdown: 'Original sentence.' });
+    const writable = [];
+    const { view } = createView(model, {}, {
+        editorFactory: () => ({
+            setDocument: document => writable.push(document.canAnnotateTranslation),
+            setCorrectionState() {}, refreshRendering() {}, destroy() {},
+        }),
+    });
+    t.after(() => view.destroy());
+    view.render({ ...model, onCreateMarkdownAnnotation() {} });
+    view.render({ ...model, onCreateMarkdownAnnotation() {} });
+    view.render(model);
+    assert.deepEqual(writable, [false, true, false]);
+});
+
+test('a translated highlight reports local storage until the complete PDF identity arrives', async t => {
+    let ids = null;
+    const { view, model, shadow, editorOptions } = createAnnotationWindow({
+        markdown: 'The original sentence.',
+        onGetSynchronizedAnnotationIDs: () => ids,
+    });
+    t.after(() => view.destroy());
+    const status = shadow.querySelector('.markdown-reader-action-status');
+    await editorOptions.createMarkdownAnnotation({
+        text: 'The original sentence.', ranges: [{ from: 0, to: 22 }], color: '#ffd400',
+    }, { side: 'source', rangesAreSource: true });
+    assert.match(status.textContent, /Saved in Mktero/);
+    view.render({ ...model, annotationOverlay: { matched: [], unmatched: [] } });
+    assert.match(status.textContent, /Saved in Mktero/);
+    ids = ['page-one', 'page-two'];
+    view.render(model);
+    assert.equal(status.textContent, 'Saved as a Zotero PDF annotation');
+});
+
+test('a mixed translated selection reports its saved range and skipped block counts after saving', async t => {
+    const markdown = 'First match. Skipped paragraph. Second match.';
+    const draft = {
+        text: 'First match. Second match.', comment: 'Evidence', color: '#ffd400',
+        ranges: [{ from: 0, to: 12 }, { from: markdown.indexOf('Second'), to: markdown.length }],
+    };
+    let synchronized = false;
+    const { view, model, shadow, created, editorOptions } = createAnnotationWindow({
+        markdown, onGetSynchronizedAnnotationIDs: () => synchronized ? ['pdf'] : [],
+    });
+    t.after(() => view.destroy());
+    const status = shadow.querySelector('.markdown-reader-action-status');
+    assert.equal(status.hidden, true);
+    await editorOptions.createMarkdownAnnotation(draft, { side: 'source', rangesAreSource: true, skippedBlockCount: 1 });
+    assert.equal(created.length, 1);
+    assert.deepEqual(created[0].ranges, draft.ranges);
+    assert.equal(created[0].skippedBlockCount, undefined, 'counts belong to the save confirmation only');
+    assert.match(status.textContent, /Highlighted 2 .*1 skipped.*Saved in Mktero/);
+    synchronized = true;
+    view.render(model);
+    assert.match(status.textContent, /Highlighted 2 .*1 skipped.*Saved as a Zotero PDF annotation/);
+
+    await assert.rejects(editorOptions.createMarkdownAnnotation({ ...draft, text: 'Unrelated quote' }, {
+        side: 'source', rangesAreSource: true, skippedBlockCount: 4,
+    }));
+    assert.equal(created.length, 1);
+    assert.equal(status.hidden, true, 'failed saves must not announce a partial success');
+});
+
+test('a translated highlight keeps the local failure reason and can retry the same annotation', async t => {
+    let ids;
+    const retries = [];
+    const { view, model, shadow, editorOptions, created } = createAnnotationWindow({
+        markdown: 'Original sentence.',
+        onGetSynchronizedAnnotationIDs: () => ids,
+        onRetryMarkdownAnnotationSynchronization: id => retries.push(id),
+    });
+    t.after(() => view.destroy());
+    const saved = await editorOptions.createMarkdownAnnotation({
+        text: model.markdown, ranges: [{ from: 0, to: model.markdown.length }], color: '#ffd400',
+    }, { side: 'source', rangesAreSource: true });
+    const status = shadow.querySelector('.markdown-reader-action-status');
+    const failed = { ...saved, synchronization: { status: 'failed', reason: 'text-ambiguous' } };
+    view.render({ ...model, annotationOverlay: { matched: [failed], unmatched: [] } });
+    assert.match(status.textContent, /PDF matching failed/);
+    view.setFocusMode(true);
+    assert.equal(status.hidden, false);
+    assert.match(shadow.querySelector('.markdown-note-sync--failed').textContent, /Multiple PDF matches/);
+    view.noteListFilter = { query: 'unrelated filter', colors: [], commentsOnly: false };
+    view.syncNotesFromModel();
+    assert.equal(shadow.querySelector('.markdown-note-link'), null);
+    status.querySelector('button').click();
+    assert.equal(view.outlineSegment, 'annotations');
+    assert.equal(view.sidePanels.outline.visible, true);
+    assert.equal(view.noteListFilter.query, '');
+    assert.equal(shadow.querySelector('.markdown-note-link').getAttribute('data-annotation-id'), saved.id);
+    assert.equal(status.hidden, true);
+    await view.retryMarkdownAnnotationSynchronization(saved.id);
+    assert.deepEqual(retries, [saved.id]);
+    assert.match(status.textContent, /Locating/);
+    ids = ['confirmed'];
+    view.render(model);
+    assert.match(status.textContent, /Zotero PDF annotation/);
+    assert.equal(created.length, 1);
+});
+
+for (const tracksPDF of [false, true]) {
+    test(`removing a translated highlight clears its feedback (PDF sync: ${tracksPDF})`, async t => {
+        const { view, model, shadow, editorOptions } = createAnnotationWindow({
+            markdown: 'Selected.',
+            onDeleteMarkdownAnnotation() {},
+            ...(tracksPDF ? { onGetSynchronizedAnnotationIDs: () => null } : {}),
+        });
+        t.after(() => view.destroy());
+        const saved = await editorOptions.createMarkdownAnnotation({
+            text: model.markdown, ranges: [{ from: 0, to: model.markdown.length }], color: '#ffd400',
+        }, { side: 'source', rangesAreSource: true });
+        const status = shadow.querySelector('.markdown-reader-action-status');
+        assert.match(status.textContent, tracksPDF ? /Locating/ : /Highlight added to this reader/);
+        await view.deleteAnnotation(saved.id);
+        assert.equal(status.hidden, true);
+        view.render(view.model);
+        assert.equal(status.hidden, true);
+    });
+}
+
+test('recognizes a fast PDF save and keeps newer reader feedback when an older save resolves', async t => {
+    const pending = Promise.withResolvers();
+    const started = Promise.withResolvers();
+    const calls = [];
+    const { view, model, shadow, editorOptions } = createAnnotationWindow({
+        markdown: 'First. Second.',
+        onCreateMarkdownAnnotation: async annotation => {
+            calls.push(annotation.text);
+            if (annotation.text === 'First.') {
+                started.resolve();
+                await pending.promise;
+            }
+            return { ...annotation, id: annotation.text, source: 'markdown', type: 'highlight' };
+        },
+        onGetSynchronizedAnnotationIDs: id => id === 'Second.' ? ['PDF00001'] : null,
+    });
+    t.after(() => view.destroy());
+    const status = shadow.querySelector('.markdown-reader-action-status');
+    const save = (text, from) => editorOptions.createMarkdownAnnotation({
+        text, ranges: [{ from, to: from + text.length }], color: '#ffd400',
+    }, { side: 'source', rangesAreSource: true });
+    const first = save('First.', 0);
+    await started.promise;
+    await save('Second.', 7);
+    assert.equal(status.textContent, 'Saved as a Zotero PDF annotation');
+    pending.resolve();
+    await first;
+    assert.equal(status.textContent, 'Saved as a Zotero PDF annotation');
+    view.reportCopyDeliveryFailure();
+    const newerMessage = status.textContent;
+    view.render(model);
+    assert.equal(status.hasAttribute('data-annotation-feedback'), false);
+    assert.equal(status.textContent, newerMessage);
+    assert.deepEqual(calls, ['First.', 'Second.']);
+});
 
 test('selects a newly saved highlight without moving the reading viewport', async () => {
     const markdown = 'Previous annotation.\n\nContext before the newly highlighted passage.';

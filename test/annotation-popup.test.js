@@ -2,8 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { createAnnotationPopup } from '../src/editor/annotation-popup.js';
-import { createTranslationSourcePopup } from '../src/editor/translation-source-popup.js';
-import { createLocalization } from '../src/i18n/localization.js';
 
 function deferred() {
     let resolve;
@@ -42,6 +40,44 @@ function createPopupFixture(options = {}) {
 const colorButtons = parent => [
     ...parent.querySelectorAll('.mktero-annotation-color-button'),
 ];
+
+test('typesets completed streamed math and retains literal text when the stream ends early', async t => {
+    const request = deferred();
+    let emit;
+    const fixture = createPopupFixture({
+        translateSelection: (_text, _context, { onTextDelta }) => {
+            emit = text => onTextDelta('', text);
+            return request.promise;
+        },
+    });
+    const { dom, parent, popup, openSelection } = fixture;
+    t.after(() => { popup.destroy(); dom.window.close(); });
+    const timers = new Map();
+    let sequence = 0;
+    dom.window.setTimeout = callback => { timers.set(++sequence, callback); return sequence; };
+    dom.window.clearTimeout = handle => timers.delete(handle);
+    const paint = () => { for (const callback of [...timers.values()]) callback(); };
+    openSelection();
+    parent.querySelector('[data-action="translate-selection"]').click();
+    const result = parent.querySelector('.mktero-selection-translation-result');
+    const literal = '<img src=x> `$z$` file_name costs $5 or $10. ';
+    emit(literal + '\\(x_');
+    paint();
+    assert.equal(result.textContent, literal + '\\(x_');
+    assert.equal(result.querySelector('img, math'), null);
+    emit(literal + '\\(x_i\\)');
+    paint();
+    assert.equal(result.querySelectorAll('math').length, 1);
+    assert.ok(result.querySelector('math msub'));
+    assert.equal(result.firstChild.textContent, literal);
+    emit(literal + '\\(x_i\\) and $\\unknowncommand{a}$');
+    request.reject(new Error('stream interrupted'));
+    await flush();
+    assert.equal(timers.size, 0);
+    assert.equal(result.querySelector('.math-fallback')?.textContent, '\\unknowncommand{a}');
+    assert.equal(result.querySelector('img'), null);
+    assert.ok(result.querySelector('msub'));
+});
 
 test('keeps highlight colors disabled when an automatic translation finishes during a create', async () => {
     const creates = [];
@@ -302,376 +338,6 @@ function finishPopup(fixture) {
     fixture.popup.destroy();
     fixture.dom.window.close();
 }
-
-test('locates an offscreen original only on request and keeps the annotation action independent', async () => {
-    const calls = [];
-    const saving = deferred();
-    const fixture = createPopupFixture({
-        createMarkdownAnnotation: (...args) => {
-            calls.push(args);
-            return saving.promise;
-        },
-    });
-    const { anchor, parent, popup } = fixture;
-    const annotation = { text: 'Original passage', ranges: [{ from: 0, to: 16 }] };
-    const selectionContext = { side: 'source', rangesAreSource: true };
-    const open = () => popup.openSourceBlockActions({
-        anchor, annotation, selectionContext,
-        offscreen: 'above',
-        revealSource: (...args) => calls.push({
-            args,
-            closed: !parent.querySelector('[role="dialog"]'),
-        }),
-    });
-
-    open();
-    assert.match(parent.textContent, /above the visible area/);
-    const locate = parent.querySelector('[data-action="locate-source"]');
-    assert.equal(locate.textContent, 'Locate original text');
-    assert.deepEqual(calls, []);
-    locate.click();
-    assert.deepEqual(calls, [{ args: [], closed: true }]);
-
-    open();
-    const nextLocate = parent.querySelector('[data-action="locate-source"]');
-    parent.querySelector('.mktero-related-source-create').click();
-    assert.equal(nextLocate.disabled, true);
-    nextLocate.click();
-    saving.resolve();
-    await flush();
-    assert.deepEqual(calls, [
-        { args: [], closed: true }, [annotation, selectionContext],
-    ]);
-    assert.equal(parent.querySelector('[role="dialog"]'), null);
-    finishPopup(fixture);
-});
-
-test('keeps localized source navigation available above the eight-block annotation limit', () => {
-    const localization = createLocalization({ zoteroLocale: 'zh-CN' });
-    const calls = [];
-    const fixture = createPopupFixture({
-        localization,
-        createMarkdownAnnotation: () => calls.push('annotate'),
-    });
-    const { anchor, parent, popup } = fixture;
-    const reason = localization.t('annotation.sourceBlockUnavailable', { count: 8 });
-    popup.openSourceBlockActions({
-        anchor,
-        blockCount: 9,
-        annotation: null,
-        annotationUnavailable: reason,
-        offscreen: 'below',
-        revealSource: () => calls.push('locate'),
-    });
-
-    const unavailable = parent.querySelector('.mktero-related-source-unavailable');
-    assert.equal(unavailable.textContent, reason);
-    assert.match(parent.textContent, /\u53ef\u89c1\u533a\u57df\u4e0b\u65b9/u);
-    const buttons = [...parent.querySelectorAll('button')];
-    assert.deepEqual(buttons.map(button => button.textContent), ['\u5b9a\u4f4d\u539f\u6587']);
-    assert.deepEqual(calls, []);
-    buttons[0].click();
-    assert.deepEqual(calls, ['locate']);
-    assert.equal(parent.querySelector('[role="dialog"]'), null);
-    finishPopup(fixture);
-});
-
-test('omits offscreen controls without both a direction and a locate callback', () => {
-    const fixture = createPopupFixture();
-    const { anchor, parent, popup } = fixture;
-    const revealSource = () => assert.fail('no navigation was requested');
-    for (const options of [
-        {},
-        { revealSource },
-        { offscreen: 'above' },
-        { offscreen: 'unknown', revealSource },
-    ]) {
-        popup.openSourceBlockActions({
-            anchor, annotation: { text: 'Original' }, ...options,
-        });
-        assert.doesNotMatch(parent.textContent, /visible area/);
-        const buttons = [...parent.querySelectorAll('button')];
-        assert.deepEqual(buttons.map(button => button.textContent), [
-            'Annotate the whole original block',
-        ]);
-    }
-    finishPopup(fixture);
-});
-
-test('full translation previews the original on request and locates it without a direction', async () => {
-    const dom = new JSDOM('<!doctype html><main><span></span></main>');
-    const parent = dom.window.document.querySelector('main');
-    const calls = [];
-    const popup = createTranslationSourcePopup(parent, {
-        createMarkdownAnnotation: annotation => calls.push(['annotate', annotation]),
-        revealSource: source => calls.push(['locate', source]),
-    });
-    const source = { text: 'Original sentence.' };
-    const annotation = { text: 'Whole original block.' };
-    const open = () => popup.open({
-        anchor: parent.querySelector('span'),
-        source,
-        offscreen: 'above',
-        annotation,
-    });
-    open();
-
-    assert.equal(parent.querySelector('.mktero-translation-source-text'), null);
-    parent.querySelector('[data-action="preview-source"]').click();
-    const original = parent.querySelector('.mktero-translation-source-text');
-    assert.equal(original.textContent, source.text);
-    assert.doesNotMatch(parent.textContent, /visible area/);
-    assert.equal(parent.querySelector('[data-action="locate-source"]').textContent,
-        createLocalization().t('ai.translationSourceLocate'));
-    assert.equal(parent.querySelector('[data-action="source-more"]'), null);
-    const save = parent.querySelector('[data-action="annotate-source"]');
-    assert.equal(save.textContent, createLocalization().t('ai.translationSourceSaveAnnotation'));
-    assert.equal(save.parentNode, parent.querySelector('[data-action="locate-source"]').parentNode);
-    assert.equal(parent.querySelector('details').open, false);
-    save.click();
-    await flush();
-    assert.equal(parent.querySelector('[role="dialog"]'), null);
-    open();
-    parent.querySelector('[data-action="preview-source"]').click();
-    parent.querySelector('[data-action="locate-source"]').click();
-    assert.deepEqual(calls, [['annotate', annotation], ['locate', source]]);
-    assert.equal(parent.querySelector('[role="dialog"]'), null);
-    popup.destroy();
-    dom.window.close();
-});
-
-function createSourceActionsFixture(mode, options = {}) {
-    const fixture = createPopupFixture(options);
-    const { parent, anchor, popup } = fixture;
-    const sourcePopup = createTranslationSourcePopup(parent, options);
-    const open = args => (mode === 'bilingual'
-        ? popup.openSourceBlockActions({ anchor, ...args })
-        : sourcePopup.open({ anchor, ...args }));
-    const action = (name, within = parent) => within.querySelector(`[data-action="${name}"]`);
-    const dialog = () => parent.querySelector('[role="dialog"]');
-    return {
-        ...fixture, open, action, dialog, sourcePopup,
-        finish() {
-            sourcePopup.destroy();
-            finishPopup(fixture);
-        },
-    };
-}
-
-for (const mode of ['bilingual', 'translated']) {
-    test(`${mode}: unaligned blocks have independent controls without automatically showing source or requesting AI`, () => {
-        const calls = [];
-        const fixture = createSourceActionsFixture(mode, {
-            revealSource: () => assert.fail('no exact source to locate'),
-            createMarkdownAnnotation: () => assert.fail('no annotation requested'),
-        });
-        const { open, action, dialog } = fixture;
-        const first = {
-            id: 'first',
-            onShowBlock: () => {
-                calls.push('show first');
-                return 'Original <first> block.';
-            },
-        };
-        const second = {
-            id: 'second',
-            onShowBlock: () => calls.push('show second'),
-        };
-        open({ wholeBlockActions: [first, second, first] });
-
-        assert.deepEqual(calls, []);
-        if (mode === 'translated') {
-            assert.equal(action('show-source-block'), null);
-            action('preview-source').click();
-        }
-        const rows = [...dialog().querySelectorAll('[data-translation-block-id]')];
-        assert.deepEqual(rows.map(row => row.dataset.translationBlockId), ['first', 'second']);
-        assert.deepEqual([...dialog().querySelectorAll('button[data-action]')].map(button => button.dataset.action),
-            mode === 'translated'
-                ? ['preview-source', 'show-source-block', 'show-source-block']
-                : ['show-source-block', 'show-source-block']);
-        assert.equal(dialog().querySelector('.mktero-related-source-scope'), null);
-        assert.equal(dialog().querySelector('.mktero-translation-source-text'), null);
-
-        action('show-source-block', rows[0]).click();
-        assert.equal(rows[0].querySelector('.mktero-translation-source-text').textContent,
-            'Original <first> block.');
-        assert.equal(rows[0].querySelector('first'), null);
-        assert.equal(rows[1].querySelector('.mktero-translation-source-text'), null);
-        action('show-source-block', rows[1]).click();
-        assert.deepEqual(calls, ['show first', 'show second']);
-        assert.equal(fixture.parent.querySelectorAll('[role="dialog"]').length, 1);
-        fixture.finish();
-    });
-
-    test(`${mode}: Escape detaches the whole-block action`, () => {
-        const fixture = createSourceActionsFixture(mode);
-        const { dom, open, action, dialog } = fixture;
-        open({ wholeBlockActions: [{
-            id: 'old',
-            onShowBlock: () => assert.fail('detached action must not read the original'),
-        }] });
-        if (mode === 'translated') action('preview-source').click();
-        const old = action('show-source-block');
-        dialog().dispatchEvent(new dom.window.KeyboardEvent('keydown', {
-            key: 'Escape', bubbles: true,
-        }));
-        assert.equal(dialog(), null);
-        old.click();
-        fixture.finish();
-    });
-}
-
-test('refreshing a bilingual selection keeps its whole-block control with an updated callback', () => {
-    const fixture = createSourceActionsFixture('bilingual');
-    const { open, action, dialog } = fixture;
-    const calls = [];
-    open({ wholeBlockActions: [{
-        id: 'legacy',
-        onShowBlock: () => assert.fail('stale original callback'),
-    }] });
-    const initialDialog = dialog();
-    const show = action('show-source-block');
-    open({
-        wholeBlockActions: [{ id: 'legacy', onShowBlock: () => calls.push('show source') }],
-        offscreen: 'above',
-        revealSource: () => calls.push('locate'),
-    });
-    assert.equal(dialog(), initialDialog);
-    assert.equal(action('show-source-block'), show);
-    assert.match(dialog().textContent, /above the visible area/);
-    show.click();
-    assert.deepEqual(calls, ['show source']);
-    fixture.finish();
-});
-
-test('bilingual scroll refresh cannot submit a duplicate while a whole-block save is pending', async () => {
-    const request = deferred();
-    const calls = [];
-    const fixture = createSourceActionsFixture('bilingual', {
-        createMarkdownAnnotation: annotation => {
-            calls.push(annotation);
-            return request.promise;
-        },
-    });
-    const { open, parent, dialog } = fixture;
-    const annotation = { text: 'Original.' };
-    open({ annotation });
-    const initialDialog = dialog();
-    parent.querySelector('.mktero-related-source-create').click();
-    open({ annotation, offscreen: 'above', revealSource() {} });
-    assert.equal(dialog(), initialDialog);
-    const save = parent.querySelector('.mktero-related-source-create');
-    assert.equal(save.disabled, true);
-    assert.equal(parent.querySelector('[data-action="locate-source"]').disabled, true);
-    save.click();
-    assert.deepEqual(calls, [annotation]);
-    request.resolve();
-    await flush();
-    assert.equal(dialog(), null);
-    fixture.finish();
-});
-
-test('translated annotation is disabled without a save handler but source actions are still available', () => {
-    const shown = [];
-    const fixture = createSourceActionsFixture('translated');
-    const { open, action } = fixture;
-    open({
-        source: { text: 'Aligned sentence.' },
-        annotation: { text: 'Aligned block.' },
-        wholeBlockActions: [{ id: 'legacy', onShowBlock: () => shown.push('legacy') }],
-    });
-    action('preview-source').click();
-    assert.equal(action('annotate-source').disabled, true);
-    assert.equal(action('source-more'), null);
-    action('show-source-block').click();
-    assert.deepEqual(shown, ['legacy']);
-    fixture.finish();
-});
-
-test('a late translated annotation failure leaves the next popup alone', async () => {
-    const request = deferred();
-    const fixture = createSourceActionsFixture('translated', {
-        createMarkdownAnnotation: () => request.promise,
-    });
-    const { open, action, dialog, sourcePopup } = fixture;
-    open({ annotation: { text: 'Previous block.' } });
-    action('preview-source').click();
-    action('annotate-source').click();
-    sourcePopup.close();
-    open({ source: { text: 'New sentence.' }, annotation: { text: 'New block.' } });
-    action('preview-source').click();
-    const nextDialog = dialog();
-    request.reject(new Error('late save failure'));
-    await flush();
-    assert.equal(dialog(), nextDialog);
-    assert.equal(dialog().querySelector('.mktero-annotation-action-error').hidden, true);
-    assert.equal(action('annotate-source').disabled, false);
-    fixture.finish();
-});
-
-test('a mixed translated selection keeps its local whole-block action after an annotation save fails', async () => {
-    const localization = createLocalization({ zoteroLocale: 'zh-CN' });
-    const calls = [];
-    const failure = deferred();
-    const fixture = createSourceActionsFixture('translated', {
-        localization,
-        createMarkdownAnnotation: (...args) => {
-            calls.push(args);
-            return calls.length === 1 ? failure.promise : Promise.resolve();
-        },
-        revealSource: () => assert.fail('no navigation requested'),
-    });
-    const { open, action, dialog, parent } = fixture;
-    const annotation = { text: 'Both matched blocks.' };
-    const selectionContext = { side: 'source', rangesAreSource: true };
-    const blockCount = 2;
-    open({
-        source: { text: 'Exact source cell.' },
-        blockCount,
-        annotation,
-        selectionContext,
-        wholeBlockActions: [{ id: 'legacy', onShowBlock: () => 'Unaligned original block.' }],
-    });
-    action('preview-source').click();
-    assert.equal(dialog().querySelector('.mktero-translation-source-label').textContent,
-        localization.t('ai.translationSourceLabel'));
-    assert.equal(dialog().querySelector('.mktero-translation-source-text').textContent, 'Exact source cell.');
-    const show = action('show-source-block');
-    const unalignedText = () => show.closest('section').querySelector('.mktero-translation-source-text')?.textContent;
-    assert.equal(unalignedText(), undefined);
-    assert.equal(action('source-more'), null);
-    assert.equal(dialog().querySelector('.mktero-translation-annotation-text').textContent, annotation.text);
-    assert.equal(dialog().querySelector('details').open, false);
-    assert.equal(action('annotate-source').textContent,
-        localization.t('ai.translationSourceSaveAnnotation'));
-    assert.equal(dialog().querySelector('.mktero-related-source-scope').textContent,
-        localization.t('ai.translationSourceSaveScopePlural', { count: blockCount }));
-    const originalDialog = dialog();
-    const save = action('annotate-source');
-    save.click();
-    save.click();
-    assert.deepEqual(calls, [[annotation, selectionContext]]);
-    assert.equal(save.disabled, true);
-    assert.equal(action('locate-source').disabled, true);
-    assert.equal(dialog(), originalDialog);
-    failure.reject(new Error('private details'));
-    await flush();
-    assert.equal(parent.querySelectorAll('[role="dialog"]').length, 1);
-    assert.equal(dialog(), originalDialog);
-    const error = dialog().querySelector('.mktero-annotation-action-error');
-    assert.equal(error.hidden, false);
-    assert.equal(error.textContent, localization.t('annotation.createFailed'));
-    assert.equal(save.disabled, false);
-    assert.equal(action('locate-source').disabled, false);
-    show.click();
-    assert.equal(unalignedText(), 'Unaligned original block.');
-    save.click();
-    await flush();
-    assert.deepEqual(calls, [[annotation, selectionContext], [annotation, selectionContext]]);
-    assert.equal(dialog(), null);
-    fixture.finish();
-});
 
 function openAddToNotePopup(kind, options) {
     const fixture = createPopupFixture(options);

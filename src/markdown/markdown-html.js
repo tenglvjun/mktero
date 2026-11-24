@@ -802,6 +802,14 @@ export function renderInlineMathTextHTML(text) {
     return html + escapeHTML(source.slice(offset));
 }
 
+// Only the formulas can produce markup. PDF prose and provider output are
+// literal text, including any HTML, links, and Markdown they contain.
+export function renderSelectionMathHTML(segments, mathBudget = createMathRenderBudget()) {
+    return segments.map(segment => segment.type === 'math'
+        ? renderMath(segment.tex, segment.display, mathBudget)
+        : escapeHTML(segment.text)).join('');
+}
+
 const DISPLAY_EQUATION_TAG = /\\tag\*?\{([^{}]{0,32})\}/gu;
 
 function renderNoteSurfaceMath(match, mathBudget) {
@@ -1498,7 +1506,7 @@ function isEscaped(source, index) {
     return backslashes % 2 === 1;
 }
 
-function createMathRenderBudget() {
+export function createMathRenderBudget() {
     let expressionCount = 0;
     let totalOutputLength = 0;
     let totalSourceLength = 0;

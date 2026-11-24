@@ -1,4 +1,4 @@
-import { renderInlineMathTextHTML, renderMarkdownHTML } from '../markdown/markdown-html.js';
+import { renderInlineMathTextHTML, renderMarkdownHTML, renderSelectionMathHTML } from '../markdown/markdown-html.js';
 import { translateEnglish } from '../i18n/localization.js';
 
 export function appendRenderedMarkdown(
@@ -41,10 +41,17 @@ export function appendInlineMathText(container, text) {
         container.append(document.createTextNode(source));
         return;
     }
-    const DOMParserType = document.defaultView.DOMParser;
-    const parsed = new DOMParserType().parseFromString(
-        `<!doctype html><html><body>${renderInlineMathTextHTML(source)}</body></html>`,
-        'text/html'
+    appendMathHTML(container, renderInlineMathTextHTML(source));
+}
+
+export function appendSelectionMath(container, segments, mathBudget) {
+    appendMathHTML(container, renderSelectionMathHTML(segments, mathBudget));
+}
+
+function appendMathHTML(container, html) {
+    const document = container.ownerDocument;
+    const parsed = new document.defaultView.DOMParser().parseFromString(
+        `<!doctype html><html><body>${html}</body></html>`, 'text/html'
     );
     container.append(...[...parsed.body.childNodes].map(node => document.importNode(node, true)));
 }

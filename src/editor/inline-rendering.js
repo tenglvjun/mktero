@@ -2738,7 +2738,7 @@ function renderedSourceRange(container) {
 
 // A selection boundary inside a math widget maps to the whole formula's
 // source range rather than to the widget's start position in CodeMirror.
-function selectionMarkdownPosition(view, node, offset, side) {
+export function selectionMarkdownPosition(view, node, offset, side) {
     const container = renderedSelectionContainer(node, view);
     if (container && isRenderedMathContainer(container)) {
         const markdownFrom = Number(container.dataset.markdownFrom);

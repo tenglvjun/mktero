@@ -123,6 +123,7 @@ import {
 } from '../editor/rendered-markdown-dom.js';
 import {
     createTranslationReadingPositionAnchor,
+    isStandaloneDisplayMath,
     mapComparisonRangeToSource,
     mapSourceRangeToComparison,
     mapSourceRangeToTranslation,
@@ -464,6 +465,7 @@ class MarkdownTabView {
         this.documentActionBusy = null;
         this.destroyed = false;
         this.actionStatusTimer = null;
+        this.translatedAnnotationFeedback = null;
         this.warningToastSignature = null;
         this.warningToastTimer = null;
         this.correctionUndoTimer = null;
@@ -631,7 +633,7 @@ class MarkdownTabView {
             deleteAnnotation: annotationID => (
                 this.deleteAnnotation(annotationID)
             ),
-            copySourcedMarkdown: target => this.copySourcedMarkdown(target),
+            copySourcedMarkdown: (target, context) => this.copySourcedMarkdown(target, context),
             // Only a platform that can lose a copy offers the clipboard read
             // (bootstrap: Windows). Elsewhere the reader copies as before.
             deliverCopy: this.canDeliverReaderCopy(model)
@@ -739,6 +741,7 @@ class MarkdownTabView {
         this.model = model;
         const elements = this.elements;
         this.syncLocalization();
+        this.syncTranslatedAnnotationFeedback();
         this.syncZoteroNotesAdapter(model);
         if (model.status !== 'ready' || model.renderMode === 'html') {
             this.clearCorrectionUndo();
@@ -955,8 +958,10 @@ class MarkdownTabView {
                 this.renderedChromeRanges = editorChromeRanges;
                 this.editor.setDocument({
                     markdown,
+                    canAnnotateTranslation: typeof model.onCreateMarkdownAnnotation === 'function',
                     annotationOverlay,
                     sourceMap,
+                    originalSourceMap: model.sourceMap,
                     figureViews,
                     ...(model.pendingFigureAssets instanceof Map
                         ? { pendingFigures: model.pendingFigureAssets }
@@ -1209,11 +1214,11 @@ class MarkdownTabView {
         return this.model.onOpenAnnotationInPDF(annotationID);
     }
 
-    copySourcedMarkdown(target) {
+    copySourcedMarkdown(target, selectionContext) {
         if (typeof this.model.onCopySourcedMarkdown !== 'function') {
             throw new Error('Sourced Markdown copy is unavailable');
         }
-        const sourceTarget = this.model.translationView === 'compare'
+        const sourceTarget = !selectionContext?.rangesAreSource && this.model.translationView === 'compare'
             ? mapComparisonTargetToSource(
                 target,
                 this.model.translationBlockRanges
@@ -1383,16 +1388,27 @@ class MarkdownTabView {
         const creation = ++this.annotationCreationGeneration;
         const selection = this.annotationSelectionGeneration;
         const createAnnotation = this.model.onCreateMarkdownAnnotation;
-        const draft = await this.prepareMarkdownAnnotationDraft(
-            annotation,
-            selectionContext
-        );
-        const saved = await createAnnotation(draft);
+        const feedback = selectionContext?.rangesAreSource === true
+            ? { itemID, localID: null, key: null, skipped: selectionContext.skippedBlockCount || 0 } : null;
+        if (feedback || this.translatedAnnotationFeedback) this.clearDocumentActionStatus();
+        this.translatedAnnotationFeedback = feedback;
+        let saved;
+        try {
+            const draft = await this.prepareMarkdownAnnotationDraft(annotation, selectionContext);
+            saved = await createAnnotation(draft);
+            if (feedback) feedback.matched = draft.ranges.length;
+        }
+        catch (error) {
+            if (this.translatedAnnotationFeedback === feedback) this.translatedAnnotationFeedback = null;
+            throw error;
+        }
         if (this.destroyed || this.model.itemID !== itemID) return saved;
+        if (feedback) feedback.localID = saved.id;
         const selectSaved = creation === this.annotationCreationGeneration
             && selection === this.annotationSelectionGeneration;
         const synchronizedIDs = this.model.onGetSynchronizedAnnotationIDs?.(saved.id) || [];
-        if (!synchronizedIDs.some(id => findOverlayAnnotation(this.model.annotationOverlay, id))) {
+        if (!findOverlayAnnotation(this.model.annotationOverlay, saved.id)
+            && !synchronizedIDs.some(id => findOverlayAnnotation(this.model.annotationOverlay, id))) {
             this.model.annotationOverlay = appendMatchedAnnotation(
                 this.model.annotationOverlay,
                 saved
@@ -1401,6 +1417,35 @@ class MarkdownTabView {
         this.render(this.model);
         if (selectSaved) this.selectCreatedAnnotation(saved.id);
         return saved;
+    }
+
+    syncTranslatedAnnotationFeedback() {
+        const feedback = this.translatedAnnotationFeedback;
+        if (!feedback) return;
+        const { itemID, onGetSynchronizedAnnotationIDs, annotationOverlay } = this.model;
+        if (itemID !== feedback.itemID || this.model.status !== 'ready' || this.model.renderMode === 'html') {
+            this.clearDocumentActionStatus();
+            return;
+        }
+        if (!feedback.localID || feedback.key === 'annotation.translatedSavedPDF') return;
+        // A local row can disappear before its PDF layer refreshes. Only the
+        // published local-to-PDF mapping confirms all parts were synchronized.
+        let key = typeof onGetSynchronizedAnnotationIDs === 'function'
+            ? 'annotation.translatedSavedPending' : 'annotation.translatedAddedToReader';
+        if (onGetSynchronizedAnnotationIDs?.(feedback.localID)?.length) {
+            key = 'annotation.translatedSavedPDF';
+        }
+        else {
+            const local = findOverlayAnnotation(annotationOverlay, feedback.localID);
+            if (local?.synchronization?.status === 'failed') key = 'annotation.translatedSavedLocal';
+            else if (!local && feedback.key) return;
+        }
+        if (feedback.key === key) return;
+        feedback.key = key;
+        this.setDocumentActionStatus(key, {
+            dismissAfter: key === 'annotation.translatedSavedPDF' || key === 'annotation.translatedAddedToReader',
+            translatedAnnotation: feedback,
+        });
     }
 
     resolveVisibleAnnotationID(annotationID, retainSynchronizing = false) {
@@ -1434,6 +1479,29 @@ class MarkdownTabView {
         else if (card.bottom > port.bottom) {
             list.scrollTop += Math.min(card.top - port.top, card.bottom - port.bottom);
         }
+    }
+
+    revealFailedAnnotation(id) {
+        this.setSidePanelVisibility('outline', true);
+        this.setOutlineSegment(OUTLINE_SEGMENT_ANNOTATIONS);
+        const entry = orderedAnnotationEntries(this.displayedAnnotationOverlay)
+            .find(item => String(item.annotation.id) === id);
+        if (!entry) return;
+        const filter = this.noteListFilter;
+        const empty = createEmptyNoteListFilter();
+        if (!filterNoteList([entry], filter).shownCount) {
+            for (const key of Object.keys(empty)) {
+                if (!filterNoteList([entry], { ...empty, [key]: filter[key] }).shownCount) {
+                    this.noteListFilter = { ...this.noteListFilter, [key]: empty[key] };
+                }
+            }
+            this.syncNotesFromModel();
+        }
+        this.selectCreatedAnnotation(id);
+        const target = [...this.elements.notesList.querySelectorAll(
+            '.markdown-note-link:not([disabled]), .markdown-note-sync-retry'
+        )].find(node => node.getAttribute('data-annotation-id') === id);
+        target?.focus({ preventScroll: true });
     }
 
     // A Markdown selection as a PDF locator draft: the original-text ranges,
@@ -1722,6 +1790,7 @@ class MarkdownTabView {
     }
 
     removeVisibleAnnotation(annotationID) {
+        if (this.translatedAnnotationFeedback?.localID === annotationID) this.clearDocumentActionStatus();
         this.model.annotationOverlay = filterAnnotationOverlay(
             this.model.annotationOverlay,
             annotationID
@@ -4764,17 +4833,35 @@ class MarkdownTabView {
         }
     }
 
-    setDocumentActionStatus(key, { dismissAfter = false } = {}) {
+    setDocumentActionStatus(key, { dismissAfter = false, translatedAnnotation = null } = {}) {
         this.clearDocumentActionStatus();
-        this.elements.actionStatus.textContent = this.t(key);
+        this.translatedAnnotationFeedback = translatedAnnotation;
+        if (translatedAnnotation) this.elements.actionStatus.setAttribute('data-annotation-feedback', 'true');
+        const status = this.t(key);
+        this.elements.actionStatus.textContent = translatedAnnotation?.skipped
+            ? this.t('annotation.translatedPartialSave', {
+                matched: translatedAnnotation.matched, skipped: translatedAnnotation.skipped, status,
+            })
+            : status;
+        if (key === 'annotation.translatedSavedLocal' && translatedAnnotation) {
+            const button = this.createElement('button', {
+                type: 'button', class: 'markdown-feedback-annotation',
+            }, this.t('annotation.viewSavedHighlight'));
+            button.addEventListener('click', () => {
+                if (this.translatedAnnotationFeedback !== translatedAnnotation
+                    || this.model.itemID !== translatedAnnotation.itemID) return;
+                this.revealFailedAnnotation(translatedAnnotation.localID);
+                this.clearDocumentActionStatus({ retainAnnotation: true });
+            });
+            this.elements.actionStatus.appendChild(button);
+        }
         this.elements.actionStatus.hidden = false;
         if (!dismissAfter || typeof this.ownerWindow.setTimeout !== 'function') {
             return;
         }
         this.actionStatusTimer = this.ownerWindow.setTimeout(() => {
             this.actionStatusTimer = null;
-            this.elements.actionStatus.textContent = '';
-            this.elements.actionStatus.hidden = true;
+            this.clearDocumentActionStatus();
         }, DOCUMENT_ACTION_STATUS_TIMEOUT_MS);
     }
 
@@ -5235,12 +5322,14 @@ class MarkdownTabView {
         this.elements.focusExit.setAttribute('title', exitLabel);
     }
 
-    clearDocumentActionStatus() {
+    clearDocumentActionStatus({ retainAnnotation = false } = {}) {
+        if (!retainAnnotation) this.translatedAnnotationFeedback = null;
         if (this.actionStatusTimer !== null) {
             this.ownerWindow.clearTimeout?.(this.actionStatusTimer);
             this.actionStatusTimer = null;
         }
         if (!this.elements?.actionStatus) return;
+        this.elements.actionStatus.removeAttribute('data-annotation-feedback');
         this.elements.actionStatus.textContent = '';
         this.elements.actionStatus.hidden = true;
     }
@@ -8788,6 +8877,7 @@ function collectDocumentLayerInputs(
         model.translationFailedBlocks,
         model.translationTargetLanguage,
         model.translationStatus,
+        typeof model.onCreateMarkdownAnnotation === 'function',
         model.annotationOverlay,
         model.sourceMap,
         model.chromeRanges,
@@ -8841,6 +8931,9 @@ export function createVisibleTranslationPairs(model, translatedView, comparisonV
         // action still need to resolve back into the source Markdown.
         const sourceFrom = range?.sourceFrom;
         const sourceTo = range?.sourceTo;
+        const validSource = Number.isSafeInteger(sourceFrom)
+            && Number.isSafeInteger(sourceTo)
+            && sourceTo > sourceFrom;
         // These coordinates are only for decorations in the current document.
         // In Bilingual the source side is comparisonMarkdown; in Translation
         // there is no source side to decorate.
@@ -8850,6 +8943,19 @@ export function createVisibleTranslationPairs(model, translatedView, comparisonV
         const sourceViewTo = comparisonView
             ? range?.comparisonSourceTo
             : null;
+        // A protected display equation appears once in both reading views.
+        // Keep its exact position for the original shown in a cross-block drag.
+        if (!translatableIDs.has(range?.id)) {
+            if (!validSource || sourceFrom < 0 || sourceTo > (model.markdown || '').length
+                || range?.type !== 'paragraph'
+                || !isStandaloneDisplayMath((model.markdown || '').slice(sourceFrom, sourceTo))) return [];
+            return [{
+                id: range.id, type: range.type, displayEquation: true, sourceFrom, sourceTo,
+                sourceViewFrom, sourceViewTo,
+                translatedFrom: comparisonView ? sourceViewFrom : range.translatedFrom,
+                translatedTo: comparisonView ? sourceViewTo : range.translatedTo,
+            }];
+        }
         // A failure still needs its range for retry navigation, but the
         // fallback is original text, not a translated selection target.
         const translatedFrom = translatedView
@@ -8862,9 +8968,6 @@ export function createVisibleTranslationPairs(model, translatedView, comparisonV
             : comparisonView
                 ? range?.comparisonTranslationTo
                 : null;
-        const validSource = Number.isSafeInteger(sourceFrom)
-            && Number.isSafeInteger(sourceTo)
-            && sourceTo > sourceFrom;
         const validSourceView = Number.isSafeInteger(sourceViewFrom)
             && Number.isSafeInteger(sourceViewTo)
             && sourceViewTo > sourceViewFrom;
@@ -8872,7 +8975,6 @@ export function createVisibleTranslationPairs(model, translatedView, comparisonV
             && Number.isSafeInteger(translatedTo)
             && translatedTo > translatedFrom;
         if (!range?.id
-            || !translatableIDs.has(range.id)
             || !validSource && !validTranslation) {
             return [];
         }

@@ -1788,9 +1788,9 @@ main {
     border-inline-end: 1px solid var(--border-subtle);
 }
 
-.markdown-reader-action-status:not([hidden]) ~ .markdown-reader-resources,
+.markdown-reader-action-status:not([hidden], [data-annotation-feedback]) ~ .markdown-reader-resources,
 .markdown-reader-resources:not([hidden]) ~ .markdown-reader-action--primary,
-.markdown-reader-action-status:not([hidden])
+.markdown-reader-action-status:not([hidden], [data-annotation-feedback])
     ~ .markdown-reader-action--primary {
     margin-inline-start: 0;
 }
@@ -1806,7 +1806,7 @@ main {
     margin-inline-start: auto;
 }
 
-.markdown-reader-action-status:not([hidden]) ~ .markdown-export-actions,
+.markdown-reader-action-status:not([hidden], [data-annotation-feedback]) ~ .markdown-export-actions,
 .markdown-reader-resources:not([hidden]) ~ .markdown-export-actions,
 .markdown-export-actions:not([hidden]) ~ .markdown-reader-action--primary {
     margin-inline-start: 0;
@@ -3156,9 +3156,38 @@ main {
     white-space: nowrap;
 }
 
-.markdown-reader-action-status:not([hidden])
+.markdown-reader-action-status:not([hidden], [data-annotation-feedback])
     + .markdown-reader-action--primary {
     margin-inline-start: 0;
+}
+
+.markdown-reader-action-status[data-annotation-feedback] {
+    position: absolute;
+    inset-block-start: calc(100% + 4px);
+    inset-inline-end: 8px;
+    max-width: min(46ch, calc(100% - 16px));
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-float);
+    color: var(--text);
+    font: 12px/1.4 var(--ui-font);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+}
+
+.markdown-feedback-annotation {
+    margin-inline-start: 6px;
+    padding: 2px 4px;
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+    pointer-events: auto;
 }
 
 .markdown-snapshot-host,
@@ -4132,11 +4161,37 @@ blockquote.mktero-note,
 }
 
 .mktero-selection-translation-result {
+    min-width: 0;
     max-width: 100%;
     color: var(--text);
     overflow-wrap: anywhere;
     line-height: 1.5;
     white-space: pre-wrap;
+}
+
+.mktero-selection-translation-result .math-display {
+    max-width: 100%;
+    overflow-x: auto;
+    padding-block: 0.25em;
+    text-align: center;
+    white-space: normal;
+}
+
+.mktero-selection-translation-result .math-inline {
+    display: inline-block;
+    max-width: 100%;
+    overflow-x: auto;
+    vertical-align: middle;
+}
+
+.mktero-selection-translation-result math {
+    font-size: 1em;
+}
+
+/* The narrow popup uses the equation number inside the native MathML table. */
+.mktero-selection-translation-result .math-display-equation-number,
+.mktero-selection-translation-result annotation {
+    display: none;
 }
 
 .mktero-selection-translation-error {
@@ -6084,139 +6139,67 @@ blockquote.mktero-note,
     }
 }
 
-/* Selection actions stay beside the translation. Only the requested panel
-   expands; long source text scrolls without hiding the toolbar or actions. */
+/* Share the original-selection card. Only the passages scroll, so the
+   selection actions and the result footer stay reachable in a narrow reader. */
 .mktero-translation-source-popup {
-    position: fixed;
-    z-index: 900;
-    display: flex;
-    width: max-content;
-    max-width: min(420px, var(--anchored-popup-available-width, 80vw));
-    max-height: min(320px, var(--anchored-popup-available-height, 60vh));
-    flex-direction: column;
-    gap: 8px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    color: var(--reader-text);
-    background: var(--surface-raised);
-    box-shadow: var(--shadow-float);
-    font: 13px/1.55 var(--reader-font);
+    min-width: min(344px, var(--anchored-popup-available-width, calc(100vw - 24px)));
+    max-width: var(--anchored-popup-available-width, calc(100vw - 24px));
+    max-height: min(360px, var(--anchored-popup-available-height, 60vh));
 }
 
-.mktero-translation-source {
+.mktero-translation-source-content {
+    max-height: inherit;
+    overflow: auto;
+    border-radius: inherit;
+}
+
+.mktero-translation-source-content .mktero-markdown-selection-actions {
     display: flex;
-    min-width: 0;
+    box-sizing: border-box;
+    max-height: inherit;
+    flex-flow: column nowrap;
+    align-items: stretch;
+}
+
+.mktero-translation-source-content .mktero-selection-translation {
+    display: flex;
     min-height: 0;
     flex-direction: column;
-    gap: 8px;
-    overflow: hidden;
-    padding: 8px 10px;
+    max-width: none;
+    contain: inline-size;
 }
 
-.mktero-translation-source [hidden] {
-    display: none;
+.mktero-translation-source-scroll {
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
 }
 
-.mktero-translation-source-toolbar {
-    display: flex;
-    flex: 0 0 auto;
-    flex-wrap: wrap;
-    gap: 6px;
+.mktero-translation-source-scroll > * + * {
+    margin-block-start: 0.4em;
 }
 
-.mktero-translation-source-toolbar > [aria-expanded="true"] {
-    border-color: transparent;
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.mktero-translation-source-toolbar > [aria-expanded] {
-    display: inline-flex;
-    align-items: center;
+.mktero-selection-translation-button--labeled {
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    min-height: 25px;
+    padding: 2px 7px;
     gap: 4px;
+    color: var(--accent);
+    font: inherit;
 }
 
-.mktero-translation-source-chevron {
-    flex: 0 0 auto;
+.mktero-translation-source-content .mktero-selection-translation:first-child {
+    padding-top: 0;
+    border-top: 0;
 }
 
-[aria-expanded="true"] > .mktero-translation-source-chevron {
-    transform: rotate(180deg);
-}
-
-.mktero-translation-source-popup[data-expansion="up"] .mktero-translation-source-toolbar {
-    order: 2;
-}
-
-.mktero-translation-source-popup[data-expansion="up"] .mktero-translation-source-status {
-    order: 1;
-}
-
-.mktero-translation-source-preview {
-    display: flex;
-    min-height: 0;
-    flex: 0 1 auto;
-    flex-direction: column;
-    gap: 6px;
-    overflow: hidden;
-}
-
-.mktero-translation-source .mktero-related-source-scope {
-    max-width: 38ch;
-}
-
-.mktero-translation-source .mktero-translation-source-text,
-.mktero-translation-annotation-text {
-    min-height: 0;
-    max-height: 7.5em;
-    flex: 0 1 auto;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-    line-height: 1.5;
-}
-
-.mktero-translation-annotation-details {
-    min-height: 0;
-    max-height: 10em;
-    flex: 0 1 auto;
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: thin;
-}
-
-.mktero-translation-annotation-details > .mktero-translation-annotation-text {
-    max-height: none;
-    overflow: visible;
-}
-
-.mktero-translation-annotation-details > summary {
-    cursor: pointer;
+.mktero-source-copy-status {
+    align-self: center;
     color: var(--muted);
-    font: 11px/1.4 var(--ui-font);
-}
-
-.mktero-translation-annotation-details[open] > summary {
-    margin-bottom: 6px;
-}
-
-.mktero-translation-source-preview > .mktero-translation-legacy-actions {
-    min-height: 0;
-    flex: 0 1 auto;
-}
-
-.mktero-translation-source .mktero-translation-source-actions,
-.mktero-translation-source-label,
-.mktero-translation-source .mktero-related-source-scope {
-    flex: 0 0 auto;
-}
-
-.mktero-translation-source-status {
-    color: var(--muted);
-    font: 12px/1.4 var(--ui-font);
+    font-size: 12px;
 }
 
 .mktero-translation-return {
@@ -6239,73 +6222,7 @@ blockquote.mktero-note,
     background: color-mix(in srgb, var(--surface-raised) 90%, var(--accent));
 }
 
-.mktero-translation-source-action:focus-visible,
 .mktero-translation-return:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
-}
-
-.mktero-translation-source-label {
-    color: var(--muted);
-    font: 11px/1.3 var(--ui-font);
-}
-
-.mktero-translation-source-direction {
-    color: var(--muted);
-    font: 11px/1.4 var(--ui-font);
-}
-
-.mktero-translation-source-text {
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-}
-
-.mktero-translation-source-actions {
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 6px;
-}
-
-.mktero-translation-source-actions > .mktero-translation-source-action {
-    min-width: 0;
-    padding-inline: 8px;
-}
-
-.mktero-related-source-scope {
-    color: var(--muted);
-    font: 11px/1.4 var(--ui-font);
-}
-
-.mktero-related-source-create {
-    padding: 4px 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--accent);
-    background: transparent;
-    font: 12px/1.3 var(--ui-font);
-    cursor: pointer;
-}
-
-.mktero-related-source-create:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
-}
-
-.mktero-related-source-create:disabled {
-    opacity: 0.6;
-    cursor: default;
-}
-
-.mktero-translation-source-action {
-    align-self: flex-start;
-    padding: 4px 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--accent);
-    background: transparent;
-    font: 12px/1.3 var(--ui-font);
-    cursor: pointer;
-}
-
-.mktero-translation-source-action:hover {
-    border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
 }

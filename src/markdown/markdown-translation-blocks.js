@@ -1285,8 +1285,9 @@ function hasTranslatableContent(markdown) {
     return /[\p{L}\p{N}]/u.test(content);
 }
 
-function isStandaloneDisplayMath(markdown) {
+export function isStandaloneDisplayMath(markdown) {
     const source = markdown.trim();
+    if (!source.startsWith('$$') && !source.startsWith('\\[')) return false;
     return findDisplayMathMatches(source).some(match => (
         match.start === 0 && match.end === source.length
     ));

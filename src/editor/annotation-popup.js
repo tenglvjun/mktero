@@ -1,4 +1,10 @@
 import { createAnchoredPopup } from './anchored-popup.js';
+import { appendSelectionMath } from './rendered-markdown-dom.js';
+import {
+    bareSelectionFormulaPatterns,
+    selectionTranslationInput,
+    translationResultMathSegments,
+} from './selection-translation-math.js';
 import {
     MAX_PDF_ANNOTATION_TEXT_LENGTH,
     ZOTERO_ANNOTATION_COLORS,
@@ -8,11 +14,6 @@ import {
     LUCIDE_ICONS,
 } from '../icons/lucide-icon.js';
 import { createLocalization } from '../i18n/localization.js';
-import {
-    createWholeBlockActions,
-    normalizeWholeBlockActions,
-    sourceBlockAnnotationLabels,
-} from './translation-legacy-actions.js';
 import {
     annotationPageLabel,
     safeAnnotationColor,
@@ -69,6 +70,7 @@ export function createAnnotationPopup(parent, {
         idPrefix: 'mktero-annotation-popup',
     });
     let selectionLocked = false;
+    let popupGeneration = 0;
     let hoverOpenTimer = null;
     let hoverOpenAnchor = null;
     let activeSelectionTranslationCancel = null;
@@ -118,6 +120,7 @@ export function createAnnotationPopup(parent, {
         save?.();
     };
     const openPopup = (options, { lockSelection = false } = {}) => {
+        popupGeneration++;
         anchoredPopup.open(options);
         selectionLocked = lockSelection && anchoredPopup.isOpen();
     };
@@ -140,6 +143,7 @@ export function createAnnotationPopup(parent, {
             label: t('annotation.noteEditor'),
             popupClassName: 'mktero-annotation-popup--note-editor',
             renderContent({ document, reposition }) {
+                const generation = popupGeneration;
                 const editor = createAnnotationNoteEditor(
                     document,
                     annotation,
@@ -161,6 +165,8 @@ export function createAnnotationPopup(parent, {
                             comment: failedComment,
                             errorText: failedError,
                         }),
+                        canRestore: () => generation === popupGeneration && status.isConnected,
+                        onDetachedActionError,
                         reposition,
                     }
                 );
@@ -185,6 +191,7 @@ export function createAnnotationPopup(parent, {
             label: t('annotation.noteEditor'),
             popupClassName: 'mktero-annotation-popup--note-editor',
             renderContent({ document, reposition }) {
+                const generation = popupGeneration;
                 const editor = createAnnotationNoteEditor(
                     document,
                     annotation,
@@ -199,7 +206,7 @@ export function createAnnotationPopup(parent, {
                             }, selectionContext)
                             : undefined,
                         close,
-                        copyQuote,
+                        copyQuote: selectionContext?.rangesAreSource ? undefined : copyQuote,
                         reopen: (failedComment, failedError) => openDraftNote({
                             anchor,
                             annotation,
@@ -207,6 +214,8 @@ export function createAnnotationPopup(parent, {
                             comment: failedComment,
                             errorText: failedError,
                         }),
+                        canRestore: () => generation === popupGeneration && status.isConnected,
+                        onDetachedActionError,
                         reposition,
                     }
                 );
@@ -217,194 +226,74 @@ export function createAnnotationPopup(parent, {
             onClose: dismissNoteEditor,
         });
     };
-    const openSelection = ({
-        anchor,
-        selection,
-        copyTarget,
-        sourceLocation,
-        canCopySource = false,
-        selectionContext,
-        onOpenNote,
+    // Both sides of the reader use this toolbar. A translated selection
+    // supplies an already-resolved original and never starts an AI request.
+    const renderSelectionActions = ({ document, close, reposition }, {
+        anchor, selection, selectionContext, copyTarget, sourceLocation,
+        canCopySource, onOpenNote, originalResult, getTranslationMath, canAnnotate = true, registerPopupCancel,
     }) => {
-        if (!selection) return;
-        cancelScheduledOpen();
-        const annotation = {
-            ...selection,
-            source: 'markdown',
-            type: 'highlight',
-            comment: '',
-            color: '#ffd400',
+        popupGeneration++;
+        const annotation = selection && {
+            ...selection, source: 'markdown', type: 'highlight', comment: '', color: '#ffd400',
         };
-        let cancelSelectionPopup = () => {};
-        let registeredSelectionPopupCancel = false;
+        return createMarkdownSelectionActions(document, annotation, t, {
+            selectionContext,
+            createMarkdownAnnotation: annotation && canAnnotate && typeof createMarkdownAnnotation === 'function'
+                ? draft => createMarkdownAnnotation(draft, selectionContext) : undefined,
+            translateSelection: originalResult ? undefined : translateSelection,
+            getTranslationMath,
+            cancelSelectionTranslation, shouldAutoTranslateSelection, copySelectionTranslation,
+            registerPopupCancel,
+            copySourcedMarkdown: canCopySource && typeof copySourcedMarkdown === 'function'
+                ? () => copySourcedMarkdown(copyTarget, selectionContext) : undefined,
+            viewPDFSource: sourceLocation && typeof openSourceLocation === 'function'
+                ? async () => {
+                    try {
+                        await openSourceLocation(sourceLocation);
+                    }
+                    catch (error) {
+                        onSourceNavigationError?.(error);
+                        throw error;
+                    }
+                } : undefined,
+            viewPDFSourceReportsErrors: typeof onSourceNavigationError === 'function',
+            addToNote: typeof addSelectionToNote === 'function'
+                ? {
+                    state: annotation ? noteState(addToNoteState, null) : { status: 'hidden' },
+                    run: targetIdentity => addSelectionToNote(annotation, selectionContext, targetIdentity),
+                } : undefined,
+            openNote() {
+                if (!annotation) return;
+                onOpenNote?.();
+                close();
+                openDraftNote({ anchor, annotation, selectionContext });
+            },
+            originalResult, close, reposition, onDetachedActionError,
+        });
+    };
+
+    const openSelection = options => {
+        if (!options.selection) return;
+        cancelScheduledOpen();
+        let cancelSelectionPopup = null;
         openPopup({
-            anchor,
+            anchor: options.anchor,
             label: t('annotation.selectionActions'),
             popupClassName: 'mktero-annotation-popup--actions',
             dismissOnMouseLeave: false,
             onClose: () => {
-                cancelSelectionPopup();
+                cancelSelectionPopup?.();
                 if (activeSelectionTranslationCancel === cancelSelectionPopup) {
                     activeSelectionTranslationCancel = null;
                 }
             },
-            renderContent({ document, close, reposition }) {
-                const actions = createMarkdownSelectionActions(
-                    document,
-                    annotation,
-                    t,
-                    {
-                        selectionContext,
-                        createMarkdownAnnotation:
-                            typeof createMarkdownAnnotation === 'function'
-                                ? draft => createMarkdownAnnotation(
-                                    draft,
-                                    selectionContext
-                                )
-                            : undefined,
-                        translateSelection:
-                            typeof translateSelection === 'function'
-                                ? (
-                                    text,
-                                    selectionContext,
-                                    options,
-                                ) => translateSelection(
-                                    text,
-                                    selectionContext,
-                                    options,
-                                )
-                            : undefined,
-                        cancelSelectionTranslation:
-                            typeof cancelSelectionTranslation === 'function'
-                                ? cancelSelectionTranslation
-                            : undefined,
-                        shouldAutoTranslateSelection,
-                        copySelectionTranslation:
-                            typeof copySelectionTranslation === 'function'
-                                ? copySelectionTranslation
-                            : undefined,
-                        copySourcedMarkdown: canCopySource
-                            && typeof copySourcedMarkdown === 'function'
-                            ? () => copySourcedMarkdown(copyTarget)
-                            : undefined,
-                        viewPDFSource: sourceLocation
-                            && typeof openSourceLocation === 'function'
-                            ? async () => {
-                                try {
-                                    await openSourceLocation(sourceLocation);
-                                }
-                                catch (error) {
-                                    onSourceNavigationError?.(error);
-                                    throw error;
-                                }
-                            }
-                            : undefined,
-                        viewPDFSourceReportsErrors:
-                            typeof onSourceNavigationError === 'function',
-                        addToNote: typeof addSelectionToNote === 'function'
-                            ? {
-                                state: noteState(addToNoteState, null),
-                                run: targetIdentity => addSelectionToNote(
-                                    annotation,
-                                    selectionContext,
-                                    targetIdentity
-                                ),
-                            }
-                            : undefined,
-                        openNote: () => {
-                            onOpenNote?.();
-                            openDraftNote({
-                                anchor,
-                                annotation,
-                                selectionContext,
-                            });
-                        },
-                        close,
-                        reposition,
-                        onDetachedActionError,
-                        registerPopupCancel: cancel => {
-                            registeredSelectionPopupCancel = true;
-                            cancelSelectionPopup = cancel;
-                        },
-                    }
-                );
-                return actions;
-            },
+            renderContent: context => renderSelectionActions(context, {
+                ...options,
+                registerPopupCancel: cancel => { cancelSelectionPopup = cancel; },
+            }),
         }, { lockSelection: true });
-        if (registeredSelectionPopupCancel) {
-            activeSelectionTranslationCancel = cancelSelectionPopup;
-        }
+        if (cancelSelectionPopup) activeSelectionTranslationCancel = cancelSelectionPopup;
     };
-    let sourceBlockPopup = null;
-    const openSourceBlockActions = ({
-        anchor,
-        annotation,
-        annotationUnavailable = null,
-        selectionContext,
-        blockCount = 1,
-        offscreen = null,
-        revealSource = null,
-        wholeBlockActions = [],
-        isCurrent = null,
-    }) => {
-        const wholeBlocks = normalizeWholeBlockActions(wholeBlockActions);
-        const direction = typeof revealSource === 'function'
-            && (offscreen === 'above' || offscreen === 'below') ? offscreen : null;
-        if (!anchor || (!annotation && !annotationUnavailable && !direction && !wholeBlocks.length)) return;
-        const buildSourceActions = ({ document, close, reposition }, save) => (
-            createSourceBlockActions(document, annotation, t, {
-                annotationUnavailable,
-                blockCount,
-                direction,
-                revealSource,
-                createMarkdownAnnotation,
-                selectionContext,
-                close,
-                reposition,
-                isCurrent,
-                save,
-            })
-        );
-        // Scrolling or revealing an original can refresh the same selection.
-        // Keep the annotation save in flight and update the show callbacks.
-        if (sourceBlockPopup?.anchor === anchor
-            && (sourceBlockPopup.controls ? sourceBlockPopup.controls.refresh(wholeBlocks) : !wholeBlocks.length)) {
-            anchoredPopup.cancelClose();
-            sourceBlockPopup.refresh(buildSourceActions);
-            return;
-        }
-        close();
-        openPopup({
-            anchor,
-            label: t('annotation.selectionActions'),
-            popupClassName: 'mktero-annotation-popup--actions',
-            dismissOnMouseLeave: false,
-            onClose: () => { sourceBlockPopup = null; },
-            renderContent(context) {
-                const save = createSourceBlockAnnotationAction(context.document, t);
-                const content = buildSourceActions(context, save);
-                const controls = wholeBlocks.length ? createWholeBlockActions(
-                    context.document, wholeBlocks, t, context.reposition
-                ) : null;
-                if (controls) content.appendChild(controls.element);
-                sourceBlockPopup = {
-                    anchor,
-                    controls,
-                    refresh(build) {
-                        const next = build(context, save);
-                        for (const child of [...content.childNodes]) {
-                            if (child !== controls?.element) child.remove();
-                        }
-                        if (controls) controls.element.before(...next.childNodes);
-                        else content.append(...next.childNodes);
-                        context.reposition();
-                    },
-                };
-                return content;
-            },
-        }, { lockSelection: true });
-    };
-
     const openSelectionHint = ({ anchor }) => {
         if (!anchor) return;
         cancelScheduledOpen();
@@ -485,7 +374,7 @@ export function createAnnotationPopup(parent, {
         open: openNote,
         openNote,
         openSelection,
-        openSourceBlockActions,
+        renderSelectionActions,
         openSelectionHint,
         openActions,
         scheduleOpenActions,
@@ -560,6 +449,8 @@ function createAnnotationNoteEditor(
         copyQuote,
         close,
         reopen,
+        canRestore,
+        onDetachedActionError,
         reposition,
     }
 ) {
@@ -631,16 +522,14 @@ function createAnnotationNoteEditor(
                     'annotation.noteSaveFailed'
                 );
                 error.hidden = false;
-                const restoreFailedSave = () => reopen?.(
-                    input.value,
-                    error.textContent
-                );
                 if (form.isConnected) {
-                    restoreFailedSave();
                     input.focus();
                 }
                 else {
-                    queueMicrotask(restoreFailedSave);
+                    queueMicrotask(() => {
+                        if (canRestore()) reopen?.(input.value, error.textContent);
+                        else onDetachedActionError?.(annotationErrorKey(cause, 'annotation.noteSaveFailed'), cause);
+                    });
                 }
                 reposition?.();
             })
@@ -675,10 +564,12 @@ function createMarkdownSelectionActions(
         createMarkdownAnnotation,
         selectionContext,
         translateSelection,
+        getTranslationMath,
         cancelSelectionTranslation,
         shouldAutoTranslateSelection,
         copySelectionTranslation,
         registerPopupCancel,
+        originalResult,
         copySourcedMarkdown,
         viewPDFSource,
         viewPDFSourceReportsErrors = false,
@@ -697,10 +588,6 @@ function createMarkdownSelectionActions(
     const toolbar = document.createElementNS(XHTML_NAMESPACE, 'div');
     toolbar.className = 'mktero-markdown-selection-toolbar';
     content.appendChild(toolbar);
-    const palette = document.createElementNS(XHTML_NAMESPACE, 'div');
-    palette.className = 'mktero-annotation-color-palette';
-    palette.setAttribute('role', 'group');
-    palette.setAttribute('aria-label', translate('annotation.addHighlight'));
     const controls = [];
     const error = document.createElementNS(XHTML_NAMESPACE, 'div');
     error.className = 'mktero-annotation-action-error';
@@ -741,6 +628,23 @@ function createMarkdownSelectionActions(
     let translationRequestID = 0;
     let autoTranslateTimer = null;
     let translatedText = '';
+    let sourceFormulas = [];
+    let renderTimer = null;
+
+    const clearRenderTimer = () => {
+        if (renderTimer !== null) document.defaultView.clearTimeout(renderTimer);
+        renderTimer = null;
+    };
+    const renderTranslation = () => {
+        clearRenderTimer();
+        const segments = translationResultMathSegments(translatedText, sourceFormulas);
+        if (segments) {
+            translationResult.replaceChildren();
+            appendSelectionMath(translationResult, segments);
+        }
+        else translationResult.textContent = translatedText;
+        translationResult.hidden = !translatedText;
+    };
 
     const clearAutoTranslateTimer = () => {
         if (autoTranslateTimer === null) return;
@@ -748,20 +652,9 @@ function createMarkdownSelectionActions(
         autoTranslateTimer = null;
     };
 
-    const createTranslationButton = (action, label, icon) => {
-        const button = document.createElementNS(XHTML_NAMESPACE, 'button');
-        button.className = 'mktero-selection-translation-button';
-        button.type = 'button';
-        button.dataset.action = action;
-        button.setAttribute('aria-label', translate(label));
-        button.setAttribute('title', translate(label));
-        button.appendChild(createLucideIcon(
-            document,
-            icon,
-            { className: 'mktero-selection-translation-icon', size: 16 }
-        ));
-        return button;
-    };
+    const createTranslationButton = (action, key, icon) => (
+        createSelectionResultButton(document, action, translate(key), icon)
+    );
 
     const translateButton = canTranslate
         ? createTranslationButton(
@@ -866,16 +759,27 @@ function createMarkdownSelectionActions(
         setExistingControlsBusy(true);
         setTranslationStatus('loading');
         try {
+            const segments = getTranslationMath?.();
+            sourceFormulas = bareSelectionFormulaPatterns(segments);
             const result = await translateSelection(
-                annotation.text,
+                segments ? selectionTranslationInput(segments) : annotation.text,
                 selectionContext,
                 {
                     onTextDelta(_chunk, accumulated) {
                         if (requestID !== translationRequestID) return;
                         translatedText = String(accumulated ?? '');
-                        translationResult.textContent = translatedText;
-                        translationResult.hidden = !translatedText;
-                        reposition?.();
+                        // Coalesce streamed math so several tokens in one paint
+                        // do not each typeset the entire passage.
+                        if (!/[$\\_^]/u.test(translatedText)) {
+                            renderTranslation();
+                            reposition?.();
+                        }
+                        else if (renderTimer === null) {
+                            renderTimer = document.defaultView.setTimeout(() => {
+                                renderTranslation();
+                                reposition?.();
+                            }, 80);
+                        }
                     },
                 },
             );
@@ -889,7 +793,7 @@ function createMarkdownSelectionActions(
                 throw emptyError;
             }
             translatedText = text;
-            translationResult.textContent = text;
+            renderTranslation();
             translationRequestID += 1;
             setExistingControlsBusy(false);
             setTranslationStatus('success');
@@ -900,13 +804,14 @@ function createMarkdownSelectionActions(
             if (streamed && !isFatalSelectionTranslationError(cause)) {
                 translationRequestID += 1;
                 translatedText = streamed;
-                translationResult.textContent = streamed;
+                renderTranslation();
                 setExistingControlsBusy(false);
                 setTranslationStatus('success');
                 return;
             }
             translationRequestID += 1;
             translatedText = '';
+            clearRenderTimer();
             translationResult.textContent = '';
             setExistingControlsBusy(false);
             translationError.textContent = annotationErrorMessage(
@@ -924,6 +829,7 @@ function createMarkdownSelectionActions(
         translationRequestID += 1;
         cancelSelectionTranslation?.();
         translatedText = '';
+        clearRenderTimer();
         translationResult.textContent = '';
         setExistingControlsBusy(false);
         setTranslationStatus('idle');
@@ -965,8 +871,9 @@ function createMarkdownSelectionActions(
         errorKey = 'annotation.actionFailed',
         { errorReported = false } = {}
     ) => {
-        if (actionPending) return;
+        if (actionPending || !content.isConnected) return;
         actionPending = true;
+        originalResult?.setBusy(true);
         syncControlsDisabled();
         error.hidden = true;
         try {
@@ -998,45 +905,54 @@ function createMarkdownSelectionActions(
         finally {
             actionPending = false;
             syncControlsDisabled();
+            originalResult?.setBusy(false);
         }
     };
 
-    for (const option of ZOTERO_ANNOTATION_COLORS) {
-        const button = document.createElementNS(XHTML_NAMESPACE, 'button');
-        button.className = 'mktero-annotation-color-button';
-        button.type = 'button';
-        button.dataset.color = option.value;
-        button.style.setProperty('--mktero-annotation-color', option.value);
-        button.setAttribute('aria-label', translate('annotation.highlightColor', {
-            color: translate(`annotation.color.${option.name}`),
-        }));
-        button.setAttribute('title', translate('annotation.highlightColor', {
-            color: translate(`annotation.color.${option.name}`),
-        }));
-        button.disabled = !canCreate;
-        button.addEventListener('click', () => run(() => (
-            createMarkdownAnnotation({ ...annotation, color: option.value })
-        ), 'annotation.createFailed'));
-        controls.push({ button, enabled: canCreate });
-        palette.appendChild(button);
-    }
-    toolbar.appendChild(palette);
+    if (!originalResult?.blockOnly) {
+        const palette = document.createElementNS(XHTML_NAMESPACE, 'div');
+        palette.className = 'mktero-annotation-color-palette';
+        palette.setAttribute('role', 'group');
+        palette.setAttribute('aria-label', translate('annotation.addHighlight'));
+        for (const option of ZOTERO_ANNOTATION_COLORS) {
+            const button = document.createElementNS(XHTML_NAMESPACE, 'button');
+            button.className = 'mktero-annotation-color-button';
+            button.type = 'button';
+            button.dataset.color = option.value;
+            button.style.setProperty('--mktero-annotation-color', option.value);
+            button.setAttribute('aria-label', translate('annotation.highlightColor', {
+                color: translate(`annotation.color.${option.name}`),
+            }));
+            button.setAttribute('title', translate('annotation.highlightColor', {
+                color: translate(`annotation.color.${option.name}`),
+            }));
+            button.disabled = !canCreate;
+            button.addEventListener('click', () => run(() => (
+                createMarkdownAnnotation({ ...annotation, color: option.value })
+            ), 'annotation.createFailed'));
+            controls.push({ button, enabled: canCreate });
+            palette.appendChild(button);
+        }
+        toolbar.appendChild(palette);
 
-    const noteButton = document.createElementNS(XHTML_NAMESPACE, 'button');
-    noteButton.className = 'mktero-annotation-note-button';
-    noteButton.type = 'button';
-    noteButton.dataset.action = 'add-note';
-    noteButton.setAttribute('aria-label', translate('annotation.addNote'));
-    noteButton.setAttribute('title', translate('annotation.addNote'));
-    noteButton.disabled = !canCreate;
-    noteButton.appendChild(createLucideIcon(
-        document,
-        LUCIDE_ICONS.messageSquarePlus,
-        { className: 'mktero-annotation-note-action-icon', size: 16 }
-    ));
-    noteButton.addEventListener('click', openNote);
-    controls.push({ button: noteButton, enabled: canCreate });
-    toolbar.appendChild(noteButton);
+        const noteButton = document.createElementNS(XHTML_NAMESPACE, 'button');
+        noteButton.className = 'mktero-annotation-note-button';
+        noteButton.type = 'button';
+        noteButton.dataset.action = 'add-note';
+        noteButton.setAttribute('aria-label', translate('annotation.addNote'));
+        noteButton.setAttribute('title', translate('annotation.addNote'));
+        noteButton.disabled = !canCreate;
+        noteButton.appendChild(createLucideIcon(
+            document,
+            LUCIDE_ICONS.messageSquarePlus,
+            { className: 'mktero-annotation-note-action-icon', size: 16 }
+        ));
+        noteButton.addEventListener('click', () => {
+            if (content.isConnected && !noteButton.disabled) openNote();
+        });
+        controls.push({ button: noteButton, enabled: canCreate });
+        toolbar.appendChild(noteButton);
+    }
 
     const addToNoteButton = createAddToNoteButton(document, translate, addToNote, {
         run: action => run(action, 'notes.addToNoteFailed'),
@@ -1103,8 +1019,23 @@ function createMarkdownSelectionActions(
             ) ?? null;
         }
     }
+    if (!toolbar.childElementCount) toolbar.remove();
+    if (originalResult) content.appendChild(originalResult.element);
     content.appendChild(error);
     return content;
+}
+
+export function createSelectionResultButton(document, action, label, icon) {
+    const button = document.createElementNS(XHTML_NAMESPACE, 'button');
+    button.className = 'mktero-selection-translation-button';
+    button.type = 'button';
+    button.dataset.action = action;
+    button.setAttribute('aria-label', label);
+    button.title = label;
+    button.appendChild(createLucideIcon(document, icon, {
+        className: 'mktero-selection-translation-icon', size: 16,
+    }));
+    return button;
 }
 
 // Opening a note moves focus into its input while the quoted Markdown stays
@@ -1140,130 +1071,6 @@ function focusNoteInput(popup) {
 }
 
 // Locating follows the matched passage; annotating covers whole source blocks.
-function createSourceBlockActions(
-    document,
-    annotation,
-    translate,
-    {
-        blockCount,
-        annotationUnavailable,
-        direction,
-        revealSource,
-        createMarkdownAnnotation,
-        selectionContext,
-        close,
-        reposition,
-        isCurrent,
-        save,
-    }
-) {
-    const content = document.createElementNS(XHTML_NAMESPACE, 'div');
-    content.className = [
-        'mktero-annotation-actions',
-        'mktero-markdown-selection-actions',
-    ].join(' ');
-
-    const labels = sourceBlockAnnotationLabels(translate, blockCount);
-    const showAnnotation = annotation && !annotationUnavailable;
-    if (showAnnotation || annotationUnavailable) {
-        const scope = document.createElementNS(XHTML_NAMESPACE, 'div');
-        scope.className = annotationUnavailable
-            ? 'mktero-related-source-unavailable'
-            : 'mktero-related-source-scope';
-        if (annotationUnavailable) scope.setAttribute('role', 'status');
-        scope.textContent = annotationUnavailable || labels.scope;
-        content.appendChild(scope);
-    }
-
-    const actions = document.createElementNS(XHTML_NAMESPACE, 'div');
-    actions.className = 'mktero-markdown-selection-toolbar';
-    let locate = null;
-    if (direction) {
-        const hint = document.createElementNS(XHTML_NAMESPACE, 'div');
-        hint.className = 'mktero-translation-source-direction';
-        hint.textContent = translate('ai.translationSourceOffscreen', {
-            direction: translate(direction === 'above'
-                ? 'ai.translationSourceAbove'
-                : 'ai.translationSourceBelow'),
-        });
-        content.appendChild(hint);
-
-        locate = document.createElementNS(XHTML_NAMESPACE, 'button');
-        locate.type = 'button';
-        locate.className = 'mktero-translation-source-action mktero-related-source-locate';
-        locate.dataset.action = 'locate-source';
-        locate.textContent = translate('annotation.sourceBlockLocate');
-        locate.addEventListener('click', () => {
-            if (locate.disabled || !locate.isConnected) return;
-            close();
-            revealSource();
-        });
-        actions.appendChild(locate);
-    }
-    if (locate || showAnnotation) content.appendChild(actions);
-    if (!showAnnotation) return content;
-
-    save.update({
-        annotation, selectionContext, createMarkdownAnnotation, close, reposition, locate,
-        isCurrent, label: labels.action,
-    });
-    actions.prepend(save.button);
-    content.appendChild(save.error);
-    return content;
-}
-
-export function createSourceBlockAnnotationAction(document, translate) {
-    const error = document.createElementNS(XHTML_NAMESPACE, 'div');
-    error.className = 'mktero-annotation-action-error';
-    error.setAttribute('role', 'status');
-    error.setAttribute('aria-live', 'polite');
-    error.hidden = true;
-
-    const button = document.createElementNS(XHTML_NAMESPACE, 'button');
-    button.type = 'button';
-    button.className = 'mktero-related-source-create';
-    let options;
-    let pending = false;
-    const updateDisabled = () => {
-        button.disabled = pending || typeof options.createMarkdownAnnotation !== 'function';
-        if (options.locate) options.locate.disabled = pending;
-    };
-    button.addEventListener('click', async () => {
-        if (button.disabled || !button.isConnected || options.isCurrent?.() === false) return;
-        const { annotation, selectionContext, createMarkdownAnnotation, close, reposition } = options;
-        pending = true;
-        updateDisabled();
-        error.hidden = true;
-        try {
-            await createMarkdownAnnotation(annotation, selectionContext);
-            if (button.isConnected) close();
-        }
-        catch (cause) {
-            if (!button.isConnected) return;
-            error.textContent = annotationErrorMessage(
-                cause,
-                translate,
-                'annotation.createFailed'
-            );
-            error.hidden = false;
-            reposition?.();
-        }
-        finally {
-            pending = false;
-            updateDisabled();
-        }
-    });
-    return {
-        button,
-        error,
-        update(next) {
-            options = next;
-            button.textContent = next.label;
-            updateDisabled();
-        },
-    };
-}
-
 function createAnnotationActions(
     document,
     annotation,
