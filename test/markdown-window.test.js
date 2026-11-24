@@ -10297,6 +10297,22 @@ function createAnnotationWindow(changes = {}, options = {}) {
     return { view, shadow, model, created, editorOptions };
 }
 
+test('republishes translated write capability when the host enables or removes annotation creation', t => {
+    const model = createModel({ status: 'ready', markdown: 'Original sentence.' });
+    const writable = [];
+    const { view } = createView(model, {}, {
+        editorFactory: () => ({
+            setDocument: document => writable.push(document.canAnnotateTranslation),
+            setCorrectionState() {}, refreshRendering() {}, destroy() {},
+        }),
+    });
+    t.after(() => view.destroy());
+    view.render({ ...model, onCreateMarkdownAnnotation() {} });
+    view.render({ ...model, onCreateMarkdownAnnotation() {} });
+    view.render(model);
+    assert.deepEqual(writable, [false, true, false]);
+});
+
 test('a translated highlight reports local storage until the complete PDF identity arrives', async t => {
     let ids = null;
     const { view, model, shadow, editorOptions } = createAnnotationWindow({
@@ -10329,12 +10345,16 @@ test('a translated highlight keeps the local failure reason and can retry the sa
         text: model.markdown, ranges: [{ from: 0, to: model.markdown.length }], color: '#ffd400',
     }, { side: 'source', rangesAreSource: true });
     const status = shadow.querySelector('.markdown-reader-action-status');
+    let dismiss;
+    view.ownerWindow.setTimeout = callback => { dismiss = callback; return 1; };
     const failed = { ...saved, synchronization: { status: 'failed', reason: 'text-ambiguous' } };
     view.render({ ...model, annotationOverlay: { matched: [failed], unmatched: [] } });
     assert.match(status.textContent, /Open Annotations/);
     view.setFocusMode(true);
     assert.equal(status.hidden, false);
     assert.match(shadow.querySelector('.markdown-note-sync--failed').textContent, /Multiple PDF matches/);
+    dismiss();
+    assert.equal(status.hidden, true);
     await view.retryMarkdownAnnotationSynchronization(saved.id);
     assert.deepEqual(retries, [saved.id]);
     assert.match(status.textContent, /Locating/);
@@ -10343,6 +10363,26 @@ test('a translated highlight keeps the local failure reason and can retry the sa
     assert.match(status.textContent, /Zotero PDF annotation/);
     assert.equal(created.length, 1);
 });
+
+for (const tracksPDF of [false, true]) {
+    test(`removing a translated highlight clears its feedback (PDF sync: ${tracksPDF})`, async t => {
+        const { view, model, shadow, editorOptions } = createAnnotationWindow({
+            markdown: 'Selected.',
+            onDeleteMarkdownAnnotation() {},
+            ...(tracksPDF ? { onGetSynchronizedAnnotationIDs: () => null } : {}),
+        });
+        t.after(() => view.destroy());
+        const saved = await editorOptions.createMarkdownAnnotation({
+            text: model.markdown, ranges: [{ from: 0, to: model.markdown.length }], color: '#ffd400',
+        }, { side: 'source', rangesAreSource: true });
+        const status = shadow.querySelector('.markdown-reader-action-status');
+        assert.match(status.textContent, tracksPDF ? /Locating/ : /Highlight added to this reader/);
+        await view.deleteAnnotation(saved.id);
+        assert.equal(status.hidden, true);
+        view.render(view.model);
+        assert.equal(status.hidden, true);
+    });
+}
 
 test('recognizes a fast PDF save and keeps newer reader feedback when an older save resolves', async t => {
     const pending = Promise.withResolvers();

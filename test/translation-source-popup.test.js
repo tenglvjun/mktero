@@ -475,12 +475,13 @@ test('guards copy, locate, legacy and save with the latest isCurrent callback', 
 });
 
 test('does not execute hidden panel actions', async t => {
+    const calls = [];
     const f = fixture(t, {
-        createMarkdownAnnotation: () => assert.fail('hidden save'),
-        revealSource: () => assert.fail('hidden locator'),
+        createMarkdownAnnotation: () => calls.push('save'),
+        revealSource: () => calls.push('locate'),
     });
     f.open({ source, annotation, previewExpanded: true, wholeBlockActions: [{
-        id: 'legacy', onShowBlock: () => assert.fail('hidden legacy'),
+        id: 'legacy', onShowBlock: () => calls.push('show block'),
     }] });
     const locate = f.action('locate-source');
     const show = f.action('show-source-block');
@@ -490,6 +491,7 @@ test('does not execute hidden panel actions', async t => {
     show.click();
     save.click();
     await flush();
+    assert.deepEqual(calls, []);
     assert.equal(f.popup.isOpen(), true);
 });
 

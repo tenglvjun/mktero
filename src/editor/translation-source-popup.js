@@ -213,7 +213,7 @@ function createContent(document, t, initialOptions, {
         const save = preview.save;
         const currentPanelRevision = panelRevision;
         const saveIsCurrent = () => preview.save === save
-            && panel && currentPanelRevision === panelRevision && isCurrent();
+            && panel !== null && currentPanelRevision === panelRevision && isCurrent();
         save.update({
             annotation: options.annotation,
             selectionContext: options.selectionContext,

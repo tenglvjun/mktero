@@ -1427,7 +1427,8 @@ class MarkdownTabView {
         if (!feedback.localID || feedback.key === 'annotation.translatedSavedPDF') return;
         // A local row can disappear before its PDF layer refreshes. Only the
         // published local-to-PDF mapping confirms all parts were synchronized.
-        let key = 'annotation.translatedSavedPending';
+        let key = typeof onGetSynchronizedAnnotationIDs === 'function'
+            ? 'annotation.translatedSavedPending' : 'annotation.translatedAddedToReader';
         if (onGetSynchronizedAnnotationIDs?.(feedback.localID)?.length) {
             key = 'annotation.translatedSavedPDF';
         }
@@ -1763,6 +1764,7 @@ class MarkdownTabView {
     }
 
     removeVisibleAnnotation(annotationID) {
+        if (this.translatedAnnotationFeedback?.localID === annotationID) this.clearDocumentActionStatus();
         this.model.annotationOverlay = filterAnnotationOverlay(
             this.model.annotationOverlay,
             annotationID
@@ -4816,7 +4818,8 @@ class MarkdownTabView {
         }
         this.actionStatusTimer = this.ownerWindow.setTimeout(() => {
             this.actionStatusTimer = null;
-            this.clearDocumentActionStatus();
+            // A reader can retry this local annotation after its message disappears.
+            this.clearDocumentActionStatus({ retainAnnotation: key === 'annotation.translatedSavedLocal' });
         }, DOCUMENT_ACTION_STATUS_TIMEOUT_MS);
     }
 
@@ -5277,8 +5280,8 @@ class MarkdownTabView {
         this.elements.focusExit.setAttribute('title', exitLabel);
     }
 
-    clearDocumentActionStatus() {
-        this.translatedAnnotationFeedback = null;
+    clearDocumentActionStatus({ retainAnnotation = false } = {}) {
+        if (!retainAnnotation) this.translatedAnnotationFeedback = null;
         if (this.actionStatusTimer !== null) {
             this.ownerWindow.clearTimeout?.(this.actionStatusTimer);
             this.actionStatusTimer = null;
@@ -8832,6 +8835,7 @@ function collectDocumentLayerInputs(
         model.translationFailedBlocks,
         model.translationTargetLanguage,
         model.translationStatus,
+        typeof model.onCreateMarkdownAnnotation === 'function',
         model.annotationOverlay,
         model.sourceMap,
         model.chromeRanges,

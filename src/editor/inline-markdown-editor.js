@@ -8,6 +8,7 @@ import {
 } from '../core/markdown-annotation-overlay.js';
 import {
     createMarkdownAnnotationTextQuote,
+    MAX_MARKDOWN_ANNOTATION_SEGMENTS,
 } from '../core/markdown-local-annotations.js';
 import {
     resolveSourceMapSelectionLocation,
@@ -1649,8 +1650,14 @@ export function createInlineMarkdownEditor({
             else ranges.push({ from, to });
         }
         const blockCount = new Set(selected.map(excerpt => excerpt.id)).size;
-        const overCap = blockCount > MAX_TRANSLATED_SELECTION_BLOCKS;
-        const parts = overCap ? [] : visibleMarkdownTextPartsForRanges(
+        let annotationUnavailable = null;
+        if (blockCount > MAX_TRANSLATED_SELECTION_BLOCKS) {
+            annotationUnavailable = t('annotation.sourceBlockUnavailable', { count: MAX_TRANSLATED_SELECTION_BLOCKS });
+        }
+        else if (ranges.length > MAX_MARKDOWN_ANNOTATION_SEGMENTS) {
+            annotationUnavailable = t('annotation.tooManySegments');
+        }
+        const parts = annotationUnavailable ? [] : visibleMarkdownTextPartsForRanges(
             currentTranslationSourceMarkdown, ranges
         );
         // The persisted text trims only the outer whitespace. Retain the
@@ -1683,9 +1690,7 @@ export function createInlineMarkdownEditor({
                 text,
                 ranges,
             } : null,
-            annotationUnavailable: overCap ? t('annotation.sourceBlockUnavailable', {
-                count: MAX_TRANSLATED_SELECTION_BLOCKS,
-            }) : null,
+            annotationUnavailable,
             selectionContext: { side: 'source', rangesAreSource: true },
         };
     };

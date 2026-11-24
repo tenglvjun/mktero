@@ -13324,6 +13324,21 @@ for (const { view, locale } of ['compare', 'translated'].flatMap(view => (
     });
 }
 
+test('keeps source reading available when one block exceeds the stored segment limit', async t => {
+    const source = 'Word '.repeat(513).trim();
+    const ranges = Array.from({ length: 513 }, (_, i) => ({ from: i * 5, to: i * 5 + 4 }));
+    const { dom, document } = openTranslationSelectionEditor(t, source, ['Many words.'], 'translated',
+        {}, pair => [projectedUnit(pair, 'many-fragments', { sourceRanges: ranges })]);
+    selectEditorText(dom, document, 'Many');
+    await settleFrame(dom.window);
+    assert.equal(document.querySelector('[data-action="review-source-annotation"]'), null);
+    assert.ok(document.querySelector('[data-action="copy-translation"]'));
+    const preview = openTranslationSourcePreview(document);
+    assert.equal(preview.querySelector('.mktero-translation-source-text').textContent, ranges.map(() => 'Word').join('\n\n'));
+    assert.match(preview.querySelector('.mktero-translation-source-unavailable').textContent, /shorter passage/);
+    assert.equal(preview.querySelector('[data-action="annotate-source"]'), null);
+});
+
 test('marks only the aligned sentence within an original list item', async t => {
     const sourceLines = [
         '- Alpha bullet sentence.',
