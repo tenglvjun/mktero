@@ -24,7 +24,7 @@ export const fixturePrefs = {
     'extensions.mktero.aiAutoTranslateSelection': false,
 };
 
-export async function prepareFixtures(run, profile, { secondPageForUnaligned = false, includeAmbiguous = false } = {}) {
+export async function prepareFixtures(run, profile, { secondPageForUnaligned = false, testAnnotationSaves = false } = {}) {
     const cache = new MarkdownCache({
         rootPath: path.join(profile, 'mktero-cache', 'v1'),
         pathUtils: { ...path, parent: path.dirname, filename: path.basename },
@@ -45,7 +45,7 @@ export async function prepareFixtures(run, profile, { secondPageForUnaligned = f
     const getSettings = () => getAISettings({ Prefs: { get: key => fixturePrefs[key] } });
     const { provider, protocol, apiBase, model, reasoning, targetLanguage } = getSettings();
     const fixtures = [];
-    for (const kind of (includeAmbiguous ? ['aligned', 'unaligned', 'ambiguous'] : ['aligned', 'unaligned'])) {
+    for (const kind of (testAnnotationSaves ? ['aligned', 'unaligned', 'ambiguous', 'mixed'] : ['aligned', 'unaligned'])) {
         const aligned = kind !== 'unaligned';
         const sentences = aligned
             ? ['The amber lamp is steady.', 'The violet dial is silent.']
@@ -53,14 +53,16 @@ export async function prepareFixtures(run, profile, { secondPageForUnaligned = f
         const units = aligned
             ? ['\u7425\u73c0\u706f\u4fdd\u6301\u7a33\u5b9a\u3002', '\u7d2b\u8272\u8868\u76d8\u6ca1\u6709\u58f0\u97f3\u3002']
             : ['\u94dc\u8d28\u5f00\u5173\u65ad\u5f00\u3002', '\u94f6\u8272\u4eea\u8868\u4fdd\u6301\u7a33\u5b9a\u3002'];
-        const markdown = sentences.join(' ');
+        const separator = kind === 'mixed' ? ' 123. ' : ' ';
+        const formula = !aligned && testAnnotationSaves ? String.raw`$\frac{s_t^{\mathrm{min}}}{2}$` : '';
+        const markdown = sentences.join(separator) + (formula ? ' ' + formula : '');
         // Place the selected sentence on its own baseline so its PDF rectangles
         // can be checked independently of the annotation's stored quotation.
-        const lines = includeAmbiguous && aligned ? [
-            [120, sentences[0]], [94, sentences[1]],
+        const lines = testAnnotationSaves && aligned ? [
+            [120, sentences[0]], ...(kind === 'mixed' ? [[107, '123.']] : []), [94, sentences[1]],
             ...(kind === 'ambiguous' ? [[64, sentences[0]], [38, sentences[1]]] : []),
         ] : null;
-        const pdf = syntheticPDF(markdown, { secondPage: !aligned && secondPageForUnaligned, lines });
+        const pdf = syntheticPDF(sentences.join(separator), { secondPage: !aligned && secondPageForUnaligned, lines });
         const pdfPath = path.join(run, `${kind}.pdf`);
         await writeFile(pdfPath, pdf);
         const documentKey = await createMarkdownCacheKey(pdf, { parserProfile: MISTRAL_PARSER_PROFILE_ID });
@@ -87,7 +89,8 @@ export async function prepareFixtures(run, profile, { secondPageForUnaligned = f
         }
         else {
             const [block] = collectMarkdownTranslationBlocks(markdown);
-            const blocks = [{ id: block.id, markdown: units.join('') }];
+            const translated = units.join('') + (formula ? ' ' + block.protectedFragments[0].placeholder : '');
+            const blocks = [{ id: block.id, markdown: translated }];
             const views = createDocumentTranslationViews(markdown, [block], blocks, { targetLanguage });
             // A current-profile translation can contain a block without a verified index.
             const identity = { provider, protocol, apiBase, model, reasoning, targetLanguage,
@@ -103,9 +106,9 @@ export async function prepareFixtures(run, profile, { secondPageForUnaligned = f
         const loaded = await service.getCachedDocumentTranslation({ documentKey, markdown, targetLanguage });
         assert.equal(loaded?.translationProfile, TRANSLATION_PROFILE_ID, `${kind}: cached translation not readable`);
         assert.equal(loaded.promptVersion, TRANSLATION_PROMPT_VERSION);
-        assert.equal(loaded.translatedMarkdown, units.join(''));
+        assert.equal(loaded.translatedMarkdown, units.join(kind === 'mixed' ? separator : '') + (formula ? ' ' + formula : ''));
         assert.equal(loaded.blockRanges[0].alignmentUnits?.length ?? 0, aligned ? 2 : 0);
-        fixtures.push({ kind, pdfPath, markdown, sentences, units });
+        fixtures.push({ kind, pdfPath, markdown, sentences, units, formula });
     }
     return fixtures;
 }

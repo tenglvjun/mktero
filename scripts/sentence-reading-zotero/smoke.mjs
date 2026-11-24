@@ -32,11 +32,13 @@ export async function runSmoke(config) {
     const uri = Services.io.newFileURI(Zotero.File.pathToFile(config.product.xpiPath)).spec;
     check(addon.getResourceURI('bootstrap.js').spec === `jar:${uri}!/bootstrap.js`, 'Product runtime did not come from the staged XPI');
     const menu = await wait(() => doc.getElementById('mktero-read-as-markdown'), 'product item menu');
+    await wait(() => win.ZoteroPane.collectionsView?.itemTreeView && win.ZoteroPane.itemsView, 'Zotero item trees');
+    await win.ZoteroPane.collectionsView.waitForLoad();
+    await win.ZoteroPane.itemsView.waitForLoad();
     const report = [];
     for (const fixture of config.fixtures) {
         await stage(`opening ${fixture.kind} synthetic PDF via product menu`);
         const pdf = await Zotero.Attachments.importFromFile({ file: fixture.pdfPath, libraryID });
-        await wait(() => win.ZoteroPane.collectionsView, 'Zotero collections tree');
         await win.ZoteroPane.selectItem(pdf.id, { inLibraryRoot: true });
         check(win.ZoteroPane.getSelectedItems().map(item => item.id).join() === String(pdf.id), 'Synthetic PDF not selected');
         menu.parentNode.dispatchEvent(new win.Event('popupshowing', { bubbles: true }));
@@ -44,7 +46,7 @@ export async function runSmoke(config) {
         const previousTab = win.Zotero_Tabs.selectedID;
         menu.dispatchEvent(new win.Event('command', { bubbles: true }));
         const root = await wait(() => [...doc.querySelectorAll('.mktero-tab-host')].map(host => host.shadowRoot)
-            .find(shadow => shadow?.querySelector('.cm-content')?.textContent.includes(fixture.markdown)), 'original Markdown');
+            .find(shadow => shadow?.querySelector('.cm-content')?.textContent.includes(fixture.sentences[0])), 'original Markdown');
         const tab = win.Zotero_Tabs.selectedID;
         check(tab && tab !== previousTab, 'Product tab did not open');
         const viewButton = name => root.querySelector(`[data-translation-view="${name}"]`);
@@ -57,35 +59,45 @@ export async function runSmoke(config) {
             selection().removeAllRanges();
             await changeView(view);
             await selectExcerpt();
-            const wholeBlock = '[data-action="show-source-block"]';
-            const oldAlignmentActions = '[data-action="enable-alignment"], [data-action="cancel-alignment"]';
-            const review = '[data-action="review-source-annotation"]';
-            const preview = await wait(() => root.querySelector('[data-action="preview-source"]'), 'selection toolbar');
-            check(!sourceText() && !root.querySelector('[data-action="annotate-source"]'), 'Selection prematurely opened review');
+            const popup = await wait(() => root.querySelector('.mktero-translation-source-popup'), 'original text popup');
+            const colors = popup.querySelectorAll('.mktero-annotation-color-button');
+            check(!popup.querySelector('input[type="checkbox"], [data-action="translate-selection"], [data-action="preview-source"]'),
+                'Unexpected extra step in translated selection');
             if (fixture.kind !== 'unaligned') {
-                check(root.querySelector(review), 'Verified selection lacks Highlight original text');
-                preview.click();
-                check(sourceText() === fixture.sentences[1], 'Preview did not show the selected original sentence');
+                check(colors.length === 8 && popup.querySelector('[data-action="add-note"]'), 'Missing shared selection toolbar');
+                check(sourceText() === fixture.sentences[1] && !colors[0].disabled, 'Incorrect automatic sentence match');
                 if (view === 'translated') {
-                    root.querySelector('[data-action="locate-source"]').click();
+                    mouseClick(popup.querySelector('[data-action="locate-source"]'));
                     await wait(() => viewButton('original').getAttribute('aria-checked') === 'true', 'locate original view');
                 }
                 else check(marks().join('') === fixture.sentences[1], 'Incorrect bilingual source marks');
-                check(!root.querySelector(wholeBlock), 'Unexpected whole-block fallback for a verified sentence');
             }
             else {
-                check(!root.querySelector(review), 'Unverified source offered a sentence highlight');
-                preview.click();
-                const show = await wait(() => root.querySelector(wholeBlock), 'show whole block');
-                check(!marks().length && !sourceText(), 'Unaligned text was presented as a matched sentence');
-                show.click();
-                check(sourceText() === fixture.markdown, 'Explicit preview did not show the whole block');
-                if (view === 'compare') check(marks().join('') === fixture.markdown, 'Missing bilingual block highlight');
-                check(!root.querySelector('[data-action="annotate-source"]'), 'Viewing the block included it in the highlight');
-                root.querySelector('[data-action="include-source-block"]').click();
-                check(root.querySelector('[data-action="annotate-source"]'), 'Included block cannot be confirmed');
+                const locate = popup.querySelector('[data-action="locate-source"]');
+                const result = popup.querySelector('.mktero-translation-source-text');
+                if (fixture.formula) {
+                    const math = result.querySelector('math');
+                    check(math?.namespaceURI === 'http://www.w3.org/1998/Math/MathML'
+                        && math.querySelector('mfrac')?.getBoundingClientRect().height > 0
+                        && math.querySelector('msubsup')?.getBoundingClientRect().width > 0,
+                    'The source popup must display a typeset fraction with both scripts in Zotero');
+                    check(math.querySelector('annotation')?.textContent === fixture.formula.slice(1, -1),
+                        'The displayed fraction differs from the source');
+                }
+                check((fixture.formula ? sourceText().startsWith(fixture.sentences.join(' ')) : sourceText() === fixture.markdown)
+                    && !colors.length && !popup.querySelector('[data-action="add-note"]'),
+                    'A whole-block preview must not offer direct annotation');
+                check(['前往原文标注', 'Annotate in original'].includes(locate?.textContent), 'Missing visible original annotation action');
+                mouseClick(locate);
+                await wait(() => viewButton(view === 'translated' ? 'original' : 'compare')?.getAttribute('aria-checked') === 'true'
+                    && root.querySelector('[data-action="return-to-translation"]'), 'original passage');
+                const original = await wait(() => findTextNode(root.querySelector('.cm-content'), fixture.sentences[1]), 'selectable original');
+                const start = original.textContent.indexOf(fixture.sentences[1]);
+                selection().setBaseAndExtent(original, start, original, start + fixture.sentences[1].length);
+                original.parentElement.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true, composed: true, button: 0 }));
+                await wait(() => root.querySelector('.mktero-annotation-popup:not(.mktero-translation-source-popup) [data-color]:enabled'),
+                    'ordinary annotation actions for the selected original');
             }
-            check(!root.querySelector(oldAlignmentActions), 'Obsolete alignment upgrade action was rendered');
             check(Services.io.offline, 'Gecko went online during reader validation');
             report.push({ fixture: fixture.kind, view, passed: true });
         }
@@ -108,16 +120,34 @@ export async function runSmoke(config) {
             await wait(() => viewButton(view)?.getAttribute('aria-checked') === 'true', `${view} mode`);
         }
 
-        async function selectExcerpt() {
-            const node = await wait(() => findTextNode(root.querySelector('.cm-content'), excerpt), 'rendered translated text');
+        async function selectExcerpt(text = excerpt) {
+            const node = await wait(() => findTextNode(root.querySelector('.cm-content'), text), 'rendered translated text');
+            node.parentElement.scrollIntoView({ block: 'nearest' });
             const range = doc.createRange();
-            const from = node.textContent.indexOf(excerpt);
-            range.setStart(node, from);
-            range.setEnd(node, from + excerpt.length);
-            selection().removeAllRanges();
-            selection().addRange(range);
-            check(selection().toString() === excerpt, 'Could not select translated excerpt');
-            node.parentElement.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true, composed: true, button: 0 }));
+            const from = node.textContent.indexOf(text);
+            const point = (index, end) => {
+                range.setStart(node, from + index);
+                range.setEnd(node, from + index + 1);
+                const rect = range.getBoundingClientRect();
+                check(rect.width && rect.height, 'Translated selection endpoint has no geometry');
+                return { x: end ? rect.right - 1 : rect.left + 1, y: rect.top + rect.height / 2 };
+            };
+            const start = point(0, false);
+            const end = point(text.length - 1, true);
+            win.windowUtils.sendMouseEvent('mousedown', start.x, start.y, 0, 1, 0);
+            try {
+                for (const length of [Math.ceil(text.length / 2), text.length]) {
+                    const next = point(length - 1, true);
+                    win.windowUtils.sendMouseEvent('mousemove', next.x, next.y, 0, 0, 0);
+                    await wait(() => selection().toString() === text.slice(0, length), 'native drag to select translated text');
+                    await new Promise(resolve => win.setTimeout(resolve, 250));
+                    check(!root.querySelector('.mktero-annotation-popup'), 'Selection popup opened before releasing the mouse');
+                }
+            }
+            finally {
+                win.windowUtils.sendMouseEvent('mouseup', end.x, end.y, 0, 1, 0);
+            }
+            check(selection().toString() === text, 'Final selection differs from the dragged excerpt');
         }
 
         function mouseClick(button) {
@@ -134,7 +164,8 @@ export async function runSmoke(config) {
 
         async function checkDurableAnnotation() {
             const ambiguous = fixture.kind === 'ambiguous';
-            await stage(`${fixture.kind} / review and confirm`);
+            const mixed = fixture.kind === 'mixed';
+            await stage(`${fixture.kind} / save displayed source`);
             selection().removeAllRanges();
             await changeView('translated');
             const sidebar = root.querySelector('#mktero-annotations');
@@ -152,12 +183,11 @@ export async function runSmoke(config) {
                 || root.querySelector('.cm-mktero-selection-retained'));
             check(!rows().length && !highlights().length, 'Synthetic document already shows annotations');
 
-            await selectExcerpt();
-            const review = await wait(() => root.querySelector('[data-action="review-source-annotation"]'), 'highlight original text');
-            mouseClick(review);
-            const scope = root.querySelector('.mktero-translation-annotation-details[open] .mktero-translation-annotation-text');
-            check(scope?.textContent === fixture.sentences[1] && !rows().length, 'Review must show the exact sentence before saving');
-            mouseClick(root.querySelector('[data-action="annotate-source"]'));
+            await selectExcerpt(mixed ? '123. ' + fixture.units[1].slice(0, -2) : excerpt);
+            const color = await wait(() => root.querySelector('.mktero-translation-source-popup [data-color="#ffd400"]'), 'yellow highlight');
+            check(sourceText() === (mixed ? fixture.markdown : fixture.sentences[1]) && !rows().length,
+                'Opening the original must show its context without saving');
+            mouseClick(color);
             await wait(() => rows().length === 1 && highlights().length, 'one durable highlight and sidebar row');
             check(!hasTemporarySelection(), 'Confirmation left a temporary selection over the highlight');
 
@@ -180,6 +210,10 @@ export async function runSmoke(config) {
                 return record.storage === 'pdf' && record;
             }, ambiguous ? 'local-only annotation with retry' : 'Zotero PDF highlight with matching sidebar ID');
             const normalize = text => String(text).replace(/\s+/g, ' ').trim();
+            if (mixed) {
+                await wait(() => /Highlighted 1 .*1 skipped|已高亮 1 处，另有 1 段/u.test(status.textContent)
+                    && /Zotero PDF/u.test(status.textContent), 'partial-save counts and PDF confirmation');
+            }
             check(saved.type === 'highlight' && saved.color?.toLowerCase() === '#ffd400'
                 && normalize(saved.text) === fixture.sentences[1], 'Stored highlight differs from the reviewed sentence');
             if (ambiguous) {

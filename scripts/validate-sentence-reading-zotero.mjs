@@ -51,7 +51,7 @@ try {
     `;
     if (!fixtureOnly) await verifySandbox(policy, env);
     const { fixturePrefs, prepareFixtures } = preflightOnly ? {} : await import('./sentence-reading-zotero/fixtures.mjs');
-    const fixtures = await prepareFixtures?.(run, profile, { includeAmbiguous: true }) || [];
+    const fixtures = await prepareFixtures?.(run, profile, { testAnnotationSaves: true }) || [];
     if (fixtureOnly) {
         console.log(JSON.stringify({ mode: 'source-module-fixtures-only', fixtures: fixtures.map(f => f.kind) }));
     }

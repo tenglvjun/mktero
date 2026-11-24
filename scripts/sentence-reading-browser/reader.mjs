@@ -10,7 +10,7 @@ let currentDocument;
 let evidence = [];
 let evidenceCleanup = null;
 let evidencePoint = null;
-const calls = { translation: 0, annotations: [], copies: [], reveals: [], flashes: [], viewChanges: [] };
+const calls = { translation: 0, annotations: [], copies: [], sourcedCopies: [], notes: [], pdfLocations: [], reveals: [], flashes: [], viewChanges: [] };
 
 export function mount({ source, views, translations, view, css, locale }) {
     const host = document.querySelector('#reader');
@@ -53,8 +53,12 @@ export function mount({ source, views, translations, view, css, locale }) {
         initialMarkdown: '',
         localization,
         shouldAutoTranslateSelection: () => true,
-        translateSelection: () => { calls.translation++; },
+        translateSelection: text => { calls.translation++; return text; },
         copySelectionTranslation: async text => { calls.copies.push(text); },
+        openSourceLocation: location => calls.pdfLocations.push(location),
+        addToNoteState: () => ({ status: 'enabled', targetTitle: 'Reading note', targetIdentity: 'test-note' }),
+        addSelectionToNote: (annotation, context, target) => calls.notes.push({ annotation, context, target }),
+        copySourcedMarkdown: (target, context) => calls.sourcedCopies.push({ target, context }),
         createMarkdownAnnotation: async (annotation, selectionContext) => {
             calls.annotations.push({ annotation, selectionContext });
             return annotation;
@@ -70,10 +74,15 @@ export function setDocument({ source, views, translations, view }) {
     editor.setDocument({
         markdown: compare ? views.comparisonMarkdown : translated ? views.translatedMarkdown : source,
         sourceMarkdown: source,
+        originalSourceMap: views.blockRanges.map((block, pageIndex) => ({
+            type: 'text', markdownFrom: block.sourceFrom, markdownTo: block.sourceTo,
+            locations: [{ pageIndex, bbox: [100, 100, 800, 340] }],
+        })),
         translationView: view,
         sourceActionRanges: compare ? views.comparisonSourceRanges : translated ? [] : null,
         translationRanges: compare ? views.comparisonTranslationRanges : [],
         translationPairs: translated || compare ? createVisibleTranslationPairs({
+            markdown: source,
             translationBlocks: translations,
             translationBlockRanges: views.blockRanges,
         }, translated, compare) : [],
@@ -183,6 +192,11 @@ function renderedRange({ text, from, to, selector = '.cm-line' }) {
     return range;
 }
 
+export function textPoint({ text, offset }) {
+    const rect = renderedRange({ text, from: offset, to: offset + 1 }).getBoundingClientRect();
+    return { x: rect.left + rect.width * 0.25, y: rect.top + rect.height / 2 };
+}
+
 export function select({ text, from, to, selector, backward, endText, endTo }) {
     const range = renderedRange({ text, from, to, selector });
     if (endText) {
@@ -199,29 +213,21 @@ export function select({ text, from, to, selector, backward, endText, endTo }) {
     return native.toString();
 }
 
-export function popupLayout({ saveScope = false } = {}) {
+export function popupLayout() {
     const popup = root.querySelector('.mktero-translation-source-popup');
     if (!popup) return null;
-    const panel = popup.querySelector('.mktero-translation-source').dataset.panel;
-    const text = panel !== 'collapsed' ? popup.querySelector(saveScope
-        ? '.mktero-translation-annotation-details[open] .mktero-translation-annotation-text'
-        : '.mktero-translation-source-text') : null;
+    const text = popup.querySelector('.mktero-translation-source-text');
     const reading = root.querySelector('.markdown-editor-host').getBoundingClientRect();
     const box = popup.getBoundingClientRect();
     const native = selection();
-    const toolbar = popup.querySelector('.mktero-translation-source-toolbar').getBoundingClientRect();
     const layout = {
         id: popup.id,
         view: currentView(),
-        panel,
-        saveScope,
-        obsoleteSourceUI: popup.querySelectorAll('[data-action="source-more"], .mktero-translation-source-more, [data-panel="more"]').length,
         expansion: popup.dataset.expansion,
         box: box.toJSON(),
         selectionRect: native.rangeCount ? native.getRangeAt(0).getBoundingClientRect().toJSON() : null,
         reading: reading.toJSON(),
         hostWidth: root.host.getBoundingClientRect().width,
-        toolbar: toolbar.toJSON(),
         popupOverflow: popup.scrollHeight - popup.clientHeight,
         actions: Array.from(popup.querySelectorAll('button[data-action]'), button => {
             const rect = button.getBoundingClientRect();
@@ -238,25 +244,20 @@ export function popupLayout({ saveScope = false } = {}) {
         }).filter(Boolean),
     };
     if (!text) return layout;
-    const scrollport = saveScope ? text.closest('details') : text;
+    const scrollport = text.closest('.mktero-translation-source-scroll');
     const portBox = scrollport.getBoundingClientRect();
     const textBox = text.getBoundingClientRect();
-    const preview = text.closest('.mktero-translation-source-preview');
-    const summary = saveScope ? scrollport.querySelector('summary') : null;
-    const summaryBox = summary?.getBoundingClientRect();
+    const preview = text.closest('.mktero-selection-translation');
     const clientBox = element => {
         const rect = element.getBoundingClientRect();
         const left = rect.left + element.clientLeft;
         const top = rect.top + element.clientTop;
         return { left, top, right: left + element.clientWidth, bottom: top + element.clientHeight };
     };
-    // The annotation body grows naturally inside the one details scrollport.
-    // Clip its text Range to the actual client area, including a visible
-    // summary (also when sticky), rather than treating the whole body as visible.
     const clips = [textBox, clientBox(scrollport), clientBox(preview), clientBox(popup)];
     const left = Math.max(...clips.map(rect => rect.left));
     const right = Math.min(...clips.map(rect => rect.right));
-    const top = Math.max(...clips.map(rect => rect.top), summaryBox?.bottom ?? -Infinity);
+    const top = Math.max(...clips.map(rect => rect.top));
     const bottom = Math.min(...clips.map(rect => rect.bottom));
     const range = document.createRange();
     range.selectNodeContents(text);
@@ -268,12 +269,10 @@ export function popupLayout({ saveScope = false } = {}) {
     return {
         ...layout,
         textBox: textBox.toJSON(),
-        scrollport: saveScope ? 'details' : 'source-text',
+        scrollport: 'source-scroll',
         scrollportBox: portBox.toJSON(),
         scrollportClientBox: clientBox(scrollport),
         scrollportOverflowY: getComputedStyle(scrollport).overflowY,
-        summaryBox: summaryBox?.toJSON() || null,
-        summaryPosition: summary ? getComputedStyle(summary).position : null,
         textOverflowY: getComputedStyle(text).overflowY,
         textMaxHeight: getComputedStyle(text).maxHeight,
         textClientHeight: text.clientHeight,

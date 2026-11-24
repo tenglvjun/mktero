@@ -1490,9 +1490,12 @@ test('styles figure references, previews, and target highlights', () => {
 });
 
 test('positions the translation source popup above the clipped reader host', () => {
-    const popup = ruleBody('.mktero-translation-source-popup');
+    const popup = ruleBody('.mktero-annotation-popup');
     assert.match(popup, /position:\s*fixed/);
     assert.match(popup, /z-index:\s*900/);
+    const translated = ruleBody('.mktero-translation-source-popup');
+    assert.match(translated, /max-width:\s*var\(--anchored-popup-available-width/);
+    assert.match(translated, /max-height:\s*min\(360px, var\(--anchored-popup-available-height/);
 
     // The host clips its overflow; only a fixed popup escapes that clip.
     const host = ruleBody('.markdown-editor-host');

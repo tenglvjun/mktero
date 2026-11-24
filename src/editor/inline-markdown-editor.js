@@ -21,9 +21,10 @@ import { createLocalization } from '../i18n/localization.js';
 import { normalizeChromeRanges, subtractChromeRanges } from '../markdown/chrome-ranges.js';
 import { createEvidenceSnippet } from '../markdown/markdown-evidence.js';
 import {
+    noteMathSegmentsText,
     noteSegmentTextKey,
+    selectionMathSegmentsForRanges,
     visibleMarkdownTextForRanges,
-    visibleMarkdownTextPartsForRanges,
 } from '../markdown/markdown-visible-text.js';
 import {
     computeDocumentFigures,
@@ -42,6 +43,7 @@ import {
     refreshInlineRendering,
     selectedMarkdownAnnotation,
     selectionAnchor,
+    selectionMarkdownPosition,
     setAnnotationOverlay,
     setChromeRanges,
     setDocumentTitle,
@@ -168,9 +170,9 @@ function translatedSelectionRanges(view, range) {
     const start = containingTable(range.startContainer);
     const end = containingTable(range.endContainer);
     let from = start ? tableBounds(start).from
-        : view.posAtDOM(range.startContainer, range.startOffset);
+        : selectionMarkdownPosition(view, range.startContainer, range.startOffset, 'start');
     const to = end ? tableBounds(end).to
-        : view.posAtDOM(range.endContainer, range.endOffset);
+        : selectionMarkdownPosition(view, range.endContainer, range.endOffset, 'end');
     const selected = [];
     for (const table of tables) {
         const bounds = tableBounds(table);
@@ -438,11 +440,6 @@ export function createInlineMarkdownEditor({
         : undefined;
     const imagePreview = createImagePreview(parent, { localization });
     const citationPopup = createCitationPopup(parent, { localization });
-    const translationSourcePopup = createTranslationSourcePopup(parent, {
-        localization,
-        createMarkdownAnnotation: saveSelectionAnnotation,
-        copyTranslation: copySelectionTranslation,
-    });
     const annotationPopup = createAnnotationPopup(parent, {
         localization,
         createMarkdownAnnotation: saveSelectionAnnotation,
@@ -450,13 +447,7 @@ export function createInlineMarkdownEditor({
         updateAnnotationComment,
         deleteAnnotation,
         copySourcedMarkdown,
-        translateSelection: typeof translateSelection === 'function'
-            ? (text, selectionContext, options) => translateSelection(
-                text,
-                selectionContext,
-                options,
-            )
-            : undefined,
+        translateSelection,
         cancelSelectionTranslation,
         shouldAutoTranslateSelection,
         copySelectionTranslation,
@@ -485,6 +476,11 @@ export function createInlineMarkdownEditor({
         onDetachedActionError: typeof onAnnotationActionError === 'function'
             ? (messageKey, error) => onAnnotationActionError(messageKey, error)
             : undefined,
+    });
+    const translationSourcePopup = createTranslationSourcePopup(parent, {
+        localization,
+        renderSelectionActions: annotationPopup.renderSelectionActions,
+        copySource: copySelectionTranslation,
     });
     const tablePreviewPopup = createTablePreviewPopup(parent, {
         resolveImageURL,
@@ -551,6 +547,8 @@ export function createInlineMarkdownEditor({
     let correctionViewportFallbackEnabled = false;
     let translationHighlightTimer = null;
     let translationSelectionScheduled = false;
+    let translationDragPointer = null;
+    let cancelledTranslationKey = null;
     let currentTranslationView = 'original';
     let selectionFlashTimer = null;
     let captionSelection = null;
@@ -758,7 +756,6 @@ export function createInlineMarkdownEditor({
         correctionViewportFallbackEnabled
     );
     let activeTranslationSelection = null;
-    let translationPopupEpoch = 0;
     let translationReturnPoint = null;
     let translationReturnElement = null;
     let translationReturnFrame = null;
@@ -800,7 +797,7 @@ export function createInlineMarkdownEditor({
                         popup.close();
                     }
                 }
-                if (keepTranslation) renderTranslationSelection(activeTranslationSelection);
+                if (keepTranslation) translationSourcePopup.reposition();
             }
             const isEditorScroll = event.type === 'scroll'
                 && event.target === view.scrollDOM;
@@ -1301,14 +1298,6 @@ export function createInlineMarkdownEditor({
         startCorrectionFromDoubleClick,
         true
     );
-    // A drag ends in a pointer-up, and a keyboard selection in a key-up. The
-    // document-level selectionchange above covers both in Gecko, but reading
-    // the selection needs the editor to have finished with the event first, so
-    // the gesture ends the same way here.
-    const onSelectionGestureEnd = () => {
-        scheduleTranslationSelectionUpdate();
-    };
-
     // The generic action popup must not also explain that this selection is
     // translated. Only the bilingual source-action path owns its result.
     const translationSelectionForDOM = () => {
@@ -1325,8 +1314,9 @@ export function createInlineMarkdownEditor({
                 subtractChromeRanges(part, currentChromeRanges)
             ));
             const hits = [];
+            const equations = [];
             const unaligned = [];
-            let hasUnmapped = false;
+            const unmapped = new Set();
             const translatedRanges = [];
             for (const pair of currentTranslationPairs) {
                 if (pair.sourceFallback) continue;
@@ -1338,9 +1328,13 @@ export function createInlineMarkdownEditor({
                         ? [{ from, to }] : [];
                 });
                 if (!selected.length) continue;
+                if (pair.displayEquation) {
+                    equations.push(wholeSourceExcerpt(pair));
+                    continue;
+                }
                 translatedRanges.push(...selected);
                 if (pair.sourceFrom == null) {
-                    hasUnmapped = true;
+                    unmapped.add(pair.id);
                     continue;
                 }
                 // Only the projected alignment units identify a precise source passage.
@@ -1355,18 +1349,23 @@ export function createInlineMarkdownEditor({
                             Math.max(unit.from, part.from), Math.min(unit.to, part.to)
                         )))) continue;
                     seen.add(unit.id);
+                    const fragment = unit.source.length > 1 || pair.type === 'table' || pair.type === 'heading';
                     unit.source.forEach((source, index) => {
                         hits.push({
                             ...sourceExcerpt(pair, source, unit.comparison?.[index]),
-                            ...(unit.sourceKind === 'sentence-group' ? { sourceKind: unit.sourceKind } : {}),
+                            sourceKind: unit.sourceKind || (fragment ? 'fragment' : 'sentence'),
                         });
                     });
                 }
-                if (!seen.size && visibleMarkdownTextForRanges(
-                    currentTranslationMarkdown, selected
-                ).trim()) unaligned.push(pair);
+                // Numeric cells and unprocessed text can fall between confirmed
+                // units in the same block. Ignore gaps that are just markup.
+                const gaps = selected.flatMap(part => subtractChromeRanges(part, pair.units));
+                if (gaps.length && visibleMarkdownTextForRanges(currentTranslationMarkdown, gaps).trim()) {
+                    unaligned.push(pair);
+                }
             }
-            if (!translatedRanges.length) return null;
+            // In Bilingual an equation on its own is already a source selection.
+            if (!translatedRanges.length && !(currentTranslationView === 'translated' && equations.length)) return null;
             return {
                 key: ranges.map(range => `${range.from}:${range.to}`).join(','),
                 ranges,
@@ -1374,8 +1373,7 @@ export function createInlineMarkdownEditor({
                     translationSelectionPoint(view, range.startContainer, range.startOffset),
                     translationSelectionPoint(view, range.endContainer, range.endOffset),
                 ],
-                translatedText: visibleMarkdownTextForRanges(currentTranslationMarkdown, translatedRanges),
-                hits, unaligned, hasUnmapped,
+                hits, equations, unaligned, unmapped,
             };
         }
         catch {
@@ -1476,7 +1474,7 @@ export function createInlineMarkdownEditor({
         };
         restore(0);
     };
-    const locateTranslationSource = (active, source) => {
+    const locateTranslationSource = (active, source, annotateInOriginal) => {
         if (destroyed || activeTranslationSelection !== active || view.state.doc !== active.doc) return;
         if (active.view === 'translated' && (typeof hostRevealTranslationSource !== 'function'
             || typeof hostSetTranslationView !== 'function')) return;
@@ -1506,6 +1504,14 @@ export function createInlineMarkdownEditor({
             }
         }
         if (!translationReturnPoint) return;
+        if (annotateInOriginal) {
+            const from = currentTranslationView === 'original' ? source.sourceFrom
+                : currentTranslationView === 'compare' ? source.viewSourceFrom : null;
+            if (Number.isSafeInteger(from) && from >= 0 && from < view.state.doc.length) {
+                view.dispatch({ selection: { anchor: from } });
+                view.focus();
+            }
+        }
         const button = ownerWindow.document.createElementNS(XHTML_NAMESPACE, 'button');
         button.type = 'button';
         button.className = 'mktero-translation-return';
@@ -1521,8 +1527,13 @@ export function createInlineMarkdownEditor({
         translationSelectionScheduled = false;
         // Original selections have no translated-side marks to clear. Even an
         // empty transaction can restore the editor cursor over a widget range.
-        if (destroyed || !view || currentTranslationView === 'original') return;
+        if (destroyed || !view || currentTranslationView === 'original' || translationDragPointer !== null) return;
+        const nativeSelection = rootSelectionFor(parent);
+        if (translationSourcePopup.contains(nativeSelection?.anchorNode)
+            || annotationPopup.isNoteOpen()) return;
         const resolved = translationSelectionForDOM();
+        if (resolved && resolved.key === cancelledTranslationKey) return;
+        cancelledTranslationKey = null;
         if (!resolved) {
             invalidateTranslationSelection();
             view.dispatch({ effects: setTranslationSelection.of(null) });
@@ -1537,24 +1548,49 @@ export function createInlineMarkdownEditor({
             anchor: selectionAnchor(rootSelectionFor(parent), view.dom, null, {
                 wholeSelection: true,
             }),
-            shown: new Set(),
-            included: new Set(),
         };
         activeTranslationSelection = active;
         updateTranslationSelection(active);
     };
 
-    const updateTranslationSelection = active => {
-        const excerpts = [...active.hits,
-            ...active.unaligned.filter(pair => active.shown.has(pair.id)).map(wholeSourceExcerpt)];
+    const readableSourceExcerpts = excerpts => {
         const unique = new Map(excerpts.map(excerpt => [
             `${excerpt.sourceFrom}:${excerpt.sourceTo}`, excerpt,
         ]));
-        active.excerpts = [...unique.values()].sort((left, right) => left.sourceFrom - right.sourceFrom)
-            .map(excerpt => ({ ...excerpt, text: sourceExcerptText(excerpt.id, excerpt.sourceFrom, excerpt.sourceTo) }));
-        const includedBlocks = active.unaligned.filter(pair => active.included.has(pair.id));
-        active.source = resolveTranslationAnnotation(active.hits, includedBlocks,
-            active.excerpts);
+        return [...unique.values()].sort((left, right) => left.sourceFrom - right.sourceFrom)
+            .flatMap(excerpt => {
+                const range = { from: excerpt.sourceFrom, to: excerpt.sourceTo };
+                const text = sourceExcerptText(excerpt.id, range.from, range.to);
+                if (!text) return [];
+                const mathSegments = mathSegmentsForQuote(currentTranslationSourceMarkdown, [range], text);
+                return [{ ...excerpt, text, mathSegments }];
+            });
+    };
+
+    const updateTranslationSelection = active => {
+        active.confirmed = readableSourceExcerpts(active.hits);
+        const context = readableSourceExcerpts(active.unaligned.map(pair => ({
+            ...wholeSourceExcerpt(pair), wholeBlock: true,
+        })));
+        const contextIDs = new Set(context.map(excerpt => excerpt.id));
+        // Show a partially matched paragraph once. Keep its confirmed ranges
+        // separately for annotations, comments and sourced copies.
+        active.excerpts = [...active.confirmed.filter(excerpt => !contextIDs.has(excerpt.id)),
+            ...readableSourceExcerpts(active.equations), ...context]
+            .sort((left, right) => left.sourceFrom - right.sourceFrom);
+        for (let index = 1; index < active.excerpts.length; index++) {
+            const previous = active.excerpts[index - 1];
+            const next = active.excerpts[index];
+            if (previous.id !== next.id || previous.wholeBlock || next.wholeBlock) continue;
+            const separator = currentTranslationSourceMarkdown.slice(previous.sourceTo, next.sourceFrom);
+            if (!/\S/u.test(separator)) {
+                // Each visible excerpt is trimmed. Restore the boundary whitespace
+                // even when the alignment included a space inside one of its ranges.
+                const trailing = currentTranslationSourceMarkdown.slice(previous.sourceFrom, previous.sourceTo).match(/\s*$/u)[0];
+                const leading = currentTranslationSourceMarkdown.slice(next.sourceFrom, next.sourceTo).match(/^\s*/u)[0];
+                next.separator = trailing + separator + leading;
+            }
+        }
         if (active.view === 'compare') {
             view.dispatch({ effects: setTranslationSelection.of(active.excerpts.map(excerpt => ({
                 id: excerpt.id, from: excerpt.viewSourceFrom, to: excerpt.viewSourceTo,
@@ -1578,133 +1614,116 @@ export function createInlineMarkdownEditor({
     };
 
     const renderTranslationSelection = active => {
-        const epoch = ++translationPopupEpoch;
-        const isCurrent = () => !destroyed && translationPopupEpoch === epoch
-            && activeTranslationSelection === active && view.state.doc === active.doc;
-        const { anchor, source: resolved } = active;
-        const wholeBlockActions = active.unaligned.map(pair => ({
-            id: pair.id,
-            shown: active.shown.has(pair.id),
-            included: active.included.has(pair.id),
-            onShowBlock: () => {
-                if (!isCurrent()) return;
-                active.shown.add(pair.id);
-                updateTranslationSelection(active);
-            },
-            onToggleInclude: canSaveTranslation && (() => {
-                if (!isCurrent()) return;
-                if (!active.included.delete(pair.id)) active.included.add(pair.id);
-                updateTranslationSelection(active);
-            }),
-        }));
-        const source = active.excerpts.length ? {
-            ...active.excerpts[0], text: resolved.text, blocks: active.excerpts, isCurrent,
-            hasSentenceGroup: active.excerpts.some(excerpt => excerpt.sourceKind === 'sentence-group'),
-        } : null;
+        const isCurrent = () => !destroyed && activeTranslationSelection === active && view.state.doc === active.doc;
+        const excerpts = active.excerpts;
+        const selected = active.confirmed;
+        const blockOnly = !selected.length && excerpts.length > 0;
+        const skippedBlockCount = new Set([...active.unmapped, ...active.unaligned.map(pair => pair.id)]).size;
+        const { selection, unavailable } = resolveTranslationAnnotation(selected);
+        let copyTarget = null;
+        if (selection && selection.ranges.every((range, index, ranges) => index === 0
+            || !/\S/u.test(currentTranslationSourceMarkdown.slice(ranges[index - 1].to, range.from)))) {
+            // Sourced copy accepts one continuous passage. Annotation ranges stay disjoint.
+            copyTarget = { kind: 'selection', text: selection.text, ranges: [
+                { from: selection.ranges[0].from, to: selection.ranges.at(-1).to },
+            ] };
+        }
+        const firstExcerpt = excerpts[0];
+        const source = firstExcerpt && { ...firstExcerpt, blocks: excerpts };
+        let sourceLocation = null;
+        for (const excerpt of selected.length ? selected : excerpts) {
+            sourceLocation = resolveSourceMapSelectionLocation(currentOriginalSourceMap,
+                { from: excerpt.sourceFrom, to: excerpt.sourceTo }, currentTranslationSourceMarkdown.length);
+            if (sourceLocation) break;
+        }
         annotationPopup.close();
         translationSourcePopup.open({
-            anchor,
-            source,
-            translatedText: active.translatedText,
-            hasMappedSentences: active.hits.length > 0,
-            annotationParts: resolved.parts,
-            excludedText: active.excerpts.filter(({ id }) => active.shown.has(id) && !active.included.has(id))
-                .map(excerpt => excerpt.text).join('\n\n'),
-            annotation: canSaveTranslation ? resolved.annotation : null,
-            annotationUnavailable: resolved.annotationUnavailable,
-            selectionContext: resolved.selectionContext,
-            blockCount: resolved.blockCount,
-            saveScope: resolved.saveScope,
-            sourceUnavailable: active.hasUnmapped ? t('ai.translationSourceUnmapped') : '',
-            wholeBlockActions,
-            isCurrent,
+            anchor: active.anchor,
+            excerpts,
+            hasSentenceGroup: excerpts.some(excerpt => excerpt.sourceKind === 'sentence-group'),
+            unavailable: excerpts.length ? unavailable : t('ai.translationSourceUnmapped'),
+            selection,
+            selectionContext: {
+                side: 'source', rangesAreSource: true,
+                ...(skippedBlockCount > 0 ? { skippedBlockCount } : {}),
+            },
+            blockOnly,
+            canAnnotate: canSaveTranslation,
+            copyTarget,
+            canCopySource: Boolean(copyTarget && createSourcedEvidence(
+                currentTranslationSourceMarkdown, currentOriginalSourceMap, copyTarget
+            )),
+            sourceLocation,
+            onOpenNote: () => retainSelectionHighlight({ ranges: active.ranges }),
             locateSource: source && (active.view === 'compare'
                 || (typeof hostRevealTranslationSource === 'function'
                     && typeof hostSetTranslationView === 'function'))
-                ? () => { if (isCurrent()) locateTranslationSource(active, source); }
+                ? () => { if (isCurrent()) locateTranslationSource(active, source, blockOnly && canSaveTranslation); }
                 : null,
         });
     };
 
-    // The cap concerns deduplicated whole original blocks, not sentence hits.
+    // Several confirmed passages in one original block count once toward the cap.
     const MAX_TRANSLATED_SELECTION_BLOCKS = 8;
 
     const invalidateTranslationSelection = () => {
-        translationPopupEpoch++;
         activeTranslationSelection = null;
         translationSourcePopup.close();
     };
 
     const sourceExcerptText = (id, from, to) => String(hostTranslateOriginalBlockText
         ? hostTranslateOriginalBlockText(id, { from, to }) || ''
-        : currentTranslationSourceMarkdown.slice(from, to)).trim();
-    const resolveTranslationAnnotation = (hits, includedBlocks, excerpts) => {
-        const selected = [...hits, ...includedBlocks.map(wholeSourceExcerpt)];
-        const ordered = selected.sort((left, right) => (
-            left.sourceFrom - right.sourceFrom || left.sourceTo - right.sourceTo
-        ));
+        : visibleMarkdownTextForRanges(currentTranslationSourceMarkdown, [{ from, to }])).trim();
+    const resolveTranslationAnnotation = excerpts => {
         const ranges = [];
-        for (const { sourceFrom: from, sourceTo: to } of ordered) {
+        for (const { sourceFrom: from, sourceTo: to } of excerpts) {
             const last = ranges.at(-1);
             if (last && from <= last.to) last.to = Math.max(last.to, to);
             else ranges.push({ from, to });
         }
-        const blockCount = new Set(selected.map(excerpt => excerpt.id)).size;
-        let annotationUnavailable = null;
-        if (blockCount > MAX_TRANSLATED_SELECTION_BLOCKS) {
-            annotationUnavailable = t('annotation.sourceBlockUnavailable', { count: MAX_TRANSLATED_SELECTION_BLOCKS });
+        if (new Set(excerpts.map(excerpt => excerpt.id)).size > MAX_TRANSLATED_SELECTION_BLOCKS) {
+            return { unavailable: t('annotation.sourceBlockUnavailable', { count: MAX_TRANSLATED_SELECTION_BLOCKS }) };
         }
-        else if (ranges.length > MAX_MARKDOWN_ANNOTATION_SEGMENTS) {
-            annotationUnavailable = t('annotation.tooManySegments');
+        if (ranges.length > MAX_MARKDOWN_ANNOTATION_SEGMENTS) {
+            return { unavailable: t('annotation.tooManySegments') };
         }
-        const parts = annotationUnavailable ? [] : visibleMarkdownTextPartsForRanges(
-            currentTranslationSourceMarkdown, ranges
-        );
-        // The persisted text trims only the outer whitespace. Retain the
-        // boundaries and exact separators of the same quotation for review.
-        while (parts.length && !parts[0].trim()) parts.shift();
-        while (parts.length && !parts.at(-1).trim()) parts.pop();
-        if (parts.length) {
-            parts[0] = parts[0].trimStart();
-            parts[parts.length - 1] = parts.at(-1).trimEnd();
-        }
-        const text = parts.join('');
-        let saveScope = hits.some(excerpt => excerpt.sourceKind === 'sentence-group')
-            ? 'ai.translationSourceSaveGroup' : 'ai.translationSourceSaveSentence';
-        if (saveScope === 'ai.translationSourceSaveSentence' && ranges.length > 1) {
-            saveScope = 'ai.translationSourceSaveSentences';
-        }
-        if (hits.length && includedBlocks.length) saveScope = 'ai.translationSourceSaveMixed';
-        else if (!hits.length) saveScope = includedBlocks.length > 1
-            ? 'ai.translationSourceSaveScopePlural' : 'ai.translationSourceSaveScope';
-        return {
-            blockCount,
-            parts,
-            saveScope,
-            text: excerpts.map(excerpt => excerpt.text).filter(Boolean).join('\n\n'),
-            annotation: text ? {
-                source: 'markdown',
-                type: 'highlight',
-                comment: '',
-                color: '#ffd400',
-                text,
-                ranges,
-            } : null,
-            annotationUnavailable,
-            selectionContext: { side: 'source', rangesAreSource: true },
-        };
+        const text = visibleMarkdownTextForRanges(currentTranslationSourceMarkdown, ranges).trim();
+        return { selection: text ? { text, ranges } : null };
     };
 
     const scheduleTranslationSelectionUpdate = () => {
-        if (translationSelectionScheduled || destroyed) return;
+        if (translationDragPointer !== null || translationSelectionScheduled || destroyed) return;
         translationSelectionScheduled = true;
-        // Selection changes fire per character of a drag. One read after the
-        // gesture settles keeps decoration rebuilds off that path.
+        // Let the browser and CodeMirror finish updating the final range.
         if (typeof ownerWindow.requestAnimationFrame === 'function') {
             ownerWindow.requestAnimationFrame(applyTranslationSelection);
             return;
         }
         ownerWindow.setTimeout?.(applyTranslationSelection, 0);
+    };
+    // Mouse compatibility events and their pointer events describe the same drag.
+    const dragPointer = event => event.pointerType === 'mouse' ? 'mouse' : event.pointerId ?? 'mouse';
+    const startTranslationDrag = event => {
+        if (translationDragPointer !== null || currentTranslationView === 'original'
+            || event.button !== 0 || event.isPrimary === false) return;
+        translationDragPointer = dragPointer(event);
+        cancelledTranslationKey = null;
+        invalidateTranslationSelection();
+    };
+    const finishTranslationDrag = event => {
+        if (event.button !== 0 || translationDragPointer !== dragPointer(event)) return;
+        translationDragPointer = null;
+        scheduleTranslationSelectionUpdate();
+    };
+    const cancelTranslationDrag = event => {
+        if (translationDragPointer === null
+            || (event.type === 'pointercancel' && translationDragPointer !== dragPointer(event))) return;
+        translationDragPointer = null;
+        // Gecko may still deliver selectionchange for the abandoned range.
+        cancelledTranslationKey = translationSelectionForDOM()?.key ?? null;
+        if (currentTranslationView === 'compare') {
+            view.dispatch({ effects: setTranslationSelection.of(null) });
+        }
     };
     const openSelectedMarkdownActions = event => {
         if (event.button !== 0) return;
@@ -1775,8 +1794,9 @@ export function createInlineMarkdownEditor({
             if (popup !== annotationPopup) popup.close();
         }
         const selectionContext = { side: 'source' };
+        const selectedDocument = view.state.doc;
         selectionSources.set(selectionContext, {
-            doc: view.state.doc,
+            doc: selectedDocument,
             hiddenRanges,
         });
         annotationPopup.openSelection({
@@ -1787,6 +1807,9 @@ export function createInlineMarkdownEditor({
             ),
             onOpenNote: () => retainSelectionHighlight(selection),
             selection,
+            getTranslationMath: () => mathSegmentsForQuote(
+                selectedDocument.toString(), selection.ranges, selection.text
+            ),
             selectionContext,
             copyTarget,
             sourceLocation: selectionSourceLocation(
@@ -1880,9 +1903,21 @@ export function createInlineMarkdownEditor({
         onGestureStart: () => { annotationSelectionClearEpoch += 1; },
         onSelectionChange: scheduleTranslationSelectionUpdate,
     });
-    parent.addEventListener('mouseup', openSelectedMarkdownActions, true);
-    parent.addEventListener('mouseup', onSelectionGestureEnd, true);
-    parent.addEventListener('keyup', onSelectionGestureEnd, true);
+    // Observe releases at the window, including when a drag leaves the reader.
+    const selectionGestureListeners = [
+        [view.dom, 'pointerdown', startTranslationDrag],
+        [view.dom, 'mousedown', startTranslationDrag],
+        [ownerWindow, 'pointerup', finishTranslationDrag],
+        [ownerWindow, 'mouseup', finishTranslationDrag],
+        [ownerWindow, 'pointercancel', cancelTranslationDrag],
+        [ownerWindow, 'blur', cancelTranslationDrag, false],
+        [parent, 'mouseup', openSelectedMarkdownActions],
+        [parent, 'mouseup', scheduleTranslationSelectionUpdate],
+        [parent, 'keyup', scheduleTranslationSelectionUpdate],
+    ];
+    for (const [target, type, listener, capture = true] of selectionGestureListeners) {
+        target.addEventListener(type, listener, capture);
+    }
     const copyDelivery = typeof deliverCopy === 'function'
         && typeof ownerWindow.setTimeout === 'function'
         ? createCopyDelivery({
@@ -1986,6 +2021,7 @@ export function createInlineMarkdownEditor({
         });
     };
     let currentSourceMap = [];
+    let currentOriginalSourceMap = [];
     let currentFigureViews = [];
     let currentPendingFigures = null;
     let currentRestoredFigures = new Map();
@@ -2011,6 +2047,7 @@ export function createInlineMarkdownEditor({
         markdown,
         annotationOverlay,
         sourceMap,
+        originalSourceMap,
         figureMap = null,
         figureViews = null,
         pendingFigures = null,
@@ -2083,6 +2120,8 @@ export function createInlineMarkdownEditor({
             annotationPopup.close();
         }
         currentSourceMap = Array.isArray(sourceMap) ? sourceMap : [];
+        const originalMapChanged = currentOriginalSourceMap !== originalSourceMap;
+        currentOriginalSourceMap = originalSourceMap;
         currentFigureViews = figureViews
             || computeDocumentFigures(analysisCache, value, { figureMap });
         const chromeRangesSource = Array.isArray(chromeRanges)
@@ -2112,11 +2151,14 @@ export function createInlineMarkdownEditor({
                 const sourceViewKnown = validReaderRange({
                     from: pair.sourceViewFrom, to: pair.sourceViewTo,
                 }, { from: 0, to: value.length });
+                if (pair.displayEquation && (!sourceKnown || value.slice(translated.from, translated.to)
+                    !== sourceValue.slice(pair.sourceFrom, pair.sourceTo))) return [];
                 const comparisonSourceFallback = translationView === 'compare'
                     && sourceKnown && pair.sourceTo <= value.length;
                 return [{
                     id: String(pair.id || ''),
                     type: pair.type,
+                    displayEquation: Boolean(pair.displayEquation),
                     sourceFallback: Boolean(pair.sourceFallback),
                     ...translated,
                     units: normalizeReaderAlignmentUnits(pair, translated,
@@ -2139,10 +2181,10 @@ export function createInlineMarkdownEditor({
             : [];
         const nextTranslationView = ['compare', 'translated'].includes(translationView)
             ? translationView : 'original';
-        if (!translationNavigationInProgress && (documentChanged
-            || currentTranslationView !== nextTranslationView
-            || currentTranslationSourceMarkdown !== sourceValue)) {
-            clearTranslationReturn();
+        if (documentChanged || currentTranslationView !== nextTranslationView
+            || currentTranslationSourceMarkdown !== sourceValue) {
+            cancelledTranslationKey = null;
+            if (!translationNavigationInProgress) clearTranslationReturn();
         }
         const capabilityChanged = canSaveTranslation !== canAnnotateTranslation;
         canSaveTranslation = canAnnotateTranslation;
@@ -2182,7 +2224,7 @@ export function createInlineMarkdownEditor({
                 : []),
             setTranslationRanges.of(translationRanges || NO_EDITOR_RANGES),
             setTranslationFailures.of(translationFailures || NO_EDITOR_RANGES),
-            setTranslationPairs.of(currentTranslationPairs.map(pair => {
+            setTranslationPairs.of(currentTranslationPairs.filter(pair => !pair.displayEquation).map(pair => {
                 const sourceFrom = translationView === 'compare'
                     ? pair.sourceViewFrom
                     : translationView === 'original'
@@ -2218,7 +2260,7 @@ export function createInlineMarkdownEditor({
         if (value === view.state.doc.toString()) {
             sameTextRefreshAt = editorClock();
             view.dispatch({ effects });
-            if (capabilityChanged && keepTranslationSelection && translationSourcePopup.isOpen()) {
+            if ((capabilityChanged || originalMapChanged) && keepTranslationSelection && translationSourcePopup.isOpen()) {
                 renderTranslationSelection(activeTranslationSelection);
             }
             return;
@@ -2454,21 +2496,9 @@ export function createInlineMarkdownEditor({
                 parent.removeEventListener('copy', enrichReaderCopy);
                 parent.removeEventListener('copy', verifyReaderCopy);
                 captionSelection.destroy();
-                parent.removeEventListener(
-                    'mouseup',
-                    openSelectedMarkdownActions,
-                    true
-                );
-                parent.removeEventListener(
-                    'mouseup',
-                    onSelectionGestureEnd,
-                    true
-                );
-                parent.removeEventListener(
-                    'keyup',
-                    onSelectionGestureEnd,
-                    true
-                );
+                for (const [target, type, listener, capture = true] of selectionGestureListeners) {
+                    target.removeEventListener(type, listener, capture);
+                }
                 parent.removeEventListener(
                     'dblclick',
                     startCorrectionFromDoubleClick,
@@ -2534,6 +2564,17 @@ function withoutSelectionTranslationContext(selectionContext) {
     }
     const { translationContext, ...annotationContext } = selectionContext;
     return annotationContext;
+}
+
+function mathSegmentsForQuote(markdown, ranges, text) {
+    const segments = selectionMathSegmentsForRanges(markdown, ranges);
+    if (!segments) return null;
+    // A host or replacement widget may supply a narrower visible quotation.
+    // Only restore math boundaries when the source ranges name that text.
+    const quote = noteSegmentTextKey(text);
+    return noteSegmentTextKey(noteMathSegmentsText(segments)) === quote
+        || noteSegmentTextKey(visibleMarkdownTextForRanges(markdown, ranges)) === quote
+        ? segments : null;
 }
 
 // In a comparison view everything outside the source action ranges is
