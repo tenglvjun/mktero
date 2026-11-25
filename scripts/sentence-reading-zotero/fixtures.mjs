@@ -33,6 +33,7 @@ export async function prepareFixtures(run, profile, { secondPageForUnaligned = f
             makeDirectory: dir => mkdir(dir, { recursive: true }),
             readUTF8: file => readFile(file, 'utf8'),
             read: readFile,
+            write: writeFile,
             stat: async file => ({ ...(await stat(file)), type: (await stat(file)).isDirectory() ? 'directory' : 'regular' }),
             getChildren: async dir => (await readdir(dir)).map(name => path.join(dir, name)),
             writeUTF8: async (file, value, { tmpPath }) => {
@@ -45,28 +46,36 @@ export async function prepareFixtures(run, profile, { secondPageForUnaligned = f
     const getSettings = () => getAISettings({ Prefs: { get: key => fixturePrefs[key] } });
     const { provider, protocol, apiBase, model, reasoning, targetLanguage } = getSettings();
     const fixtures = [];
-    for (const kind of (testAnnotationSaves ? ['aligned', 'unaligned', 'ambiguous', 'mixed'] : ['aligned', 'unaligned'])) {
-        const aligned = kind !== 'unaligned';
-        const sentences = aligned
-            ? ['The amber lamp is steady.', 'The violet dial is silent.']
+    const kinds = testAnnotationSaves ? ['aligned', 'unaligned', 'ambiguous', 'mixed', 'caption'] : ['aligned', 'unaligned'];
+    for (const kind of kinds) {
+        const caption = kind === 'caption';
+        const aligned = !caption && kind !== 'unaligned';
+        const sentences = aligned || caption
+            ? [caption ? 'Fig. 1.' : 'The amber lamp is steady.', 'The violet dial is silent.']
             : ['The copper switch is open.', 'The silver gauge is stable.'];
-        const units = aligned
+        const units = aligned || caption
             ? ['\u7425\u73c0\u706f\u4fdd\u6301\u7a33\u5b9a\u3002', '\u7d2b\u8272\u8868\u76d8\u6ca1\u6709\u58f0\u97f3\u3002']
             : ['\u94dc\u8d28\u5f00\u5173\u65ad\u5f00\u3002', '\u94f6\u8272\u4eea\u8868\u4fdd\u6301\u7a33\u5b9a\u3002'];
         const separator = kind === 'mixed' ? ' 123. ' : ' ';
-        const formula = !aligned && testAnnotationSaves ? String.raw`$\frac{s_t^{\mathrm{min}}}{2}$` : '';
-        const markdown = sentences.join(separator) + (formula ? ' ' + formula : '');
+        const formula = kind === 'unaligned' && testAnnotationSaves ? String.raw`$\frac{s_t^{\mathrm{min}}}{2}$` : '';
+        const text = sentences.join(separator);
+        const imagePath = 'images/fixture.png';
+        const markdown = caption ? '![' + text + '](' + imagePath + ')' : text + (formula ? ' ' + formula : '');
         // Place the selected sentence on its own baseline so its PDF rectangles
         // can be checked independently of the annotation's stored quotation.
-        const lines = testAnnotationSaves && aligned ? [
+        const lines = testAnnotationSaves && (aligned || caption) ? [
             [120, sentences[0]], ...(kind === 'mixed' ? [[107, '123.']] : []), [94, sentences[1]],
             ...(kind === 'ambiguous' ? [[64, sentences[0]], [38, sentences[1]]] : []),
         ] : null;
-        const pdf = syntheticPDF(sentences.join(separator), { secondPage: !aligned && secondPageForUnaligned, lines });
+        const pdf = syntheticPDF(text, { secondPage: kind === 'unaligned' && secondPageForUnaligned, lines });
         const pdfPath = path.join(run, `${kind}.pdf`);
         await writeFile(pdfPath, pdf);
         const documentKey = await createMarkdownCacheKey(pdf, { parserProfile: MISTRAL_PARSER_PROFILE_ID });
-        await cache.put(documentKey, { markdown, assets: [], parserProfile: MISTRAL_PARSER_PROFILE_ID });
+        const assets = caption ? [{
+            path: imagePath, mimeType: 'image/png',
+            data: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aQhcAAAAASUVORK5CYII=', 'base64'),
+        }] : [];
+        await cache.put(documentKey, { markdown, assets, parserProfile: MISTRAL_PARSER_PROFILE_ID });
         let mockedRequests = 0;
         const service = new MarkdownTranslationService({
             aiGateway: { async generateText({ messages }) {
@@ -89,7 +98,9 @@ export async function prepareFixtures(run, profile, { secondPageForUnaligned = f
         }
         else {
             const [block] = collectMarkdownTranslationBlocks(markdown);
-            const translated = units.join('') + (formula ? ' ' + block.protectedFragments[0].placeholder : '');
+            const translated = caption
+                ? block.requestMarkdown.replace(sentences[1], units[1])
+                : units.join('') + (formula ? ' ' + block.protectedFragments[0].placeholder : '');
             const blocks = [{ id: block.id, markdown: translated }];
             const views = createDocumentTranslationViews(markdown, [block], blocks, { targetLanguage });
             // A current-profile translation can contain a block without a verified index.
@@ -106,8 +117,12 @@ export async function prepareFixtures(run, profile, { secondPageForUnaligned = f
         const loaded = await service.getCachedDocumentTranslation({ documentKey, markdown, targetLanguage });
         assert.equal(loaded?.translationProfile, TRANSLATION_PROFILE_ID, `${kind}: cached translation not readable`);
         assert.equal(loaded.promptVersion, TRANSLATION_PROMPT_VERSION);
-        assert.equal(loaded.translatedMarkdown, units.join(kind === 'mixed' ? separator : '') + (formula ? ' ' + formula : ''));
-        assert.equal(loaded.blockRanges[0].alignmentUnits?.length ?? 0, aligned ? 2 : 0);
+        const expected = caption ? markdown.replace(sentences[1], units[1])
+            : units.join(kind === 'mixed' ? separator : '') + (formula ? ' ' + formula : '');
+        assert.equal(loaded.translatedMarkdown, expected);
+        const alignment = loaded.blockRanges[0].alignmentUnits || [];
+        if (caption) assert.deepEqual(alignment.map(unit => unit.sourceKind), ['caption']);
+        else assert.equal(alignment.length, aligned ? 2 : 0);
         fixtures.push({ kind, pdfPath, markdown, sentences, units, formula });
     }
     return fixtures;

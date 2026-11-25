@@ -26,6 +26,7 @@ import {
 import {
     analyzeMarkdownFigureReferences,
 } from '../src/markdown/markdown-figure-references.js';
+import { normalizeMarkdownFigureCaptions } from '../src/markdown/markdown-figures.js';
 import {
     analyzeMarkdownTableReferences,
 } from '../src/markdown/markdown-table-references.js';
@@ -1634,6 +1635,22 @@ test('projects list sentences and table cells without indexing their delimiters'
     assert.deepEqual(mapAlignedTranslationSelection({ from: listRange.comparisonSourceTo, to: listRange.comparisonTranslationFrom }, views.blockRanges, 'compare'), []);
     assert.deepEqual(mapAlignedTranslationSelection({ from: listRange.translatedFrom, to: one.translatedFrom }, views.blockRanges, 'translated'), []);
     assert.deepEqual(mapAlignedTranslationSelection({ from: second.translatedTo, to: other.translatedFrom }, views.blockRanges, 'translated'), []);
+});
+
+test('keeps caption sentence offsets when bilingual rendering unescapes a formula', () => {
+    const formula = '$' + '\\Delta' + '$';
+    const source = normalizeMarkdownFigureCaptions(
+        '![](images/chart.png)\n\nFig. 1. The change is ' + formula + '. All counts agree.'
+    );
+    const [block] = collectMarkdownTranslationBlocks(source);
+    const placeholder = block.protectedFragments.find(fragment => fragment.markdown.includes('Delta')).placeholder;
+    const translation = alignedResponse(block, ['变化为 ' + placeholder + '。', '计数一致。']);
+    const views = createDocumentTranslationViews(source, [block], [translation]);
+    const [first, second] = views.blockRanges[0].alignmentUnits;
+    assert.equal(views.comparisonMarkdown.slice(first.comparisonTranslationFrom, first.comparisonTranslationTo),
+        '变化为 ' + formula + '。');
+    assertUnitProjection(source, views, second, 'All counts agree.', '计数一致。');
+    assert.equal(views.comparisonMarkdown.match(/!\[/g).length, 1);
 });
 
 test('keeps readable Markdown but discards stale or corrupt sentence indexes', () => {

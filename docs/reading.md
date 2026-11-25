@@ -125,11 +125,13 @@ In `Translation` and on the translated side of `Bilingual`, drag to select text.
 - The copy icon below the result copies the displayed original. To copy the selected translation, use the usual keyboard copy shortcut while the reader selection is active.
 - Choose `Go to original` to read the passage in context. In Bilingual, this goes to the original in the same view. In Translation, it switches to Original. `Return to translation` restores the previous view, reading position and selection.
 
-Looking up the original works offline using the saved translation. A selection can show both confirmed sentences and whole paragraphs for context. Highlights, comments and additions to notes use only the confirmed sentences or sentence groups. After you save a highlight or comment, the reader reports how many passages it highlighted and how many it skipped. When the entire selection can only be located at paragraph level, choose `Annotate in original` below the text and select the words you want to mark.
+Looking up the original works offline using the saved translation. A selection can show both confirmed sentences and whole paragraphs for context. Highlights, comments and additions to notes use the confirmed passages. After you save a highlight or comment, the reader reports how many passages it highlighted and how many it skipped. When the entire selection can only be located at paragraph level, choose `Annotate in original` below the text and select the words you want to mark.
+
+Drag across a translated figure caption to see its original. If the saved translation lacks sentence alignment, Mktero can confirm the whole caption by its protected figure label and image path. The popup shows the original caption text that the color action will annotate.
 
 Separate original fragments keep their own ranges. Mktero saves the annotation locally while it locates the original in the PDF. Once all fragments have a Zotero annotation, the reader confirms the PDF save. If a match fails, choose `View annotation` in the message to open the entry in the left sidebar, see the reason and retry.
 
-After saving, the corresponding translated passage is highlighted, and the left column's `Annotations` segment lists the same annotation. Switching between Original, Translation, and Bilingual does not create another copy. Annotations stay anchored to the source for PDF location. An existing annotation without a reliable match in the translation stays in the sidebar, but no translated text is highlighted for it.
+After saving, the highlight appears on the matching passage in Translation and only on the original side in Bilingual. The left column's `Annotations` segment lists the same annotation across views. Annotations stay anchored to the source for PDF location. A highlight that expands to a whole translated sentence or caption is labeled in the sidebar.
 
 ## Details
 

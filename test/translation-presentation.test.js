@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { projectSourceAnnotationRanges } from '../src/editor/translation-presentation.js';
+import {
+    projectSourceAnnotation,
+    projectSourceAnnotationRanges,
+} from '../src/editor/translation-presentation.js';
 import {
     collectMarkdownTranslationBlocks,
     createDocumentTranslationViews,
+    mapAlignedTranslationSelection,
 } from '../src/markdown/markdown-translation-blocks.js';
 import { assembleAlignedBlock, createAlignmentPlan } from '../src/markdown/translation-alignment.js';
 import { createVisibleMarkdownTextIndex } from '../src/markdown/markdown-visible-text.js';
@@ -100,7 +104,7 @@ test('does not guess partial legacy matches even with a shared substring and equ
     assert.deepEqual(projectSourceAnnotationRanges([{ from: 0, to: 10 }], view), [{ from: 0, to: 10 }]);
 });
 
-test('projects only fully covered verified sentences and does not infer alignment from old or damaged records', () => {
+test('projects sentence-contained annotations and does not infer alignment from old or damaged records', () => {
     const sourceMarkdown = 'Fig. 2 rose. Latency fell. Accuracy improved.';
     const [block] = collectMarkdownTranslationBlocks(sourceMarkdown);
     const { units } = createAlignmentPlan(block);
@@ -117,8 +121,12 @@ test('projects only fully covered verified sentences and does not infer alignmen
     const [first, second, third] = view.blockRanges[0].alignmentUnits;
     const [from, to] = [second.sourceRanges[0].from, second.sourceRanges[0].to];
     assert.deepEqual(projectSourceAnnotationRanges([{ from, to }], view), [viewRange(second)]);
-    assert.deepEqual(projectSourceAnnotationRanges([{ from, to: to - 1 }], view), []);
-    assert.deepEqual(projectSourceAnnotationRanges([{ from: to, to: to + 1 }], view), []);
+    assert.deepEqual(projectSourceAnnotationRanges([{ from, to: to - 1 }], view), [viewRange(second)]);
+    const thirdFrom = third.sourceRanges[0].from;
+    assert.deepEqual(projectSourceAnnotationRanges([{
+        from: thirdFrom + 1,
+        to: thirdFrom + 3,
+    }], view), [viewRange(third)]);
     assert.deepEqual(projectSourceAnnotationRanges([{ from: 0, to: from + 1 }], view), [viewRange(first)]);
     assert.deepEqual(projectSourceAnnotationRanges([...third.sourceRanges, ...first.sourceRanges], view), [
         viewRange(first), viewRange(third),
@@ -127,6 +135,137 @@ test('projects only fully covered verified sentences and does not infer alignmen
     const damaged = structuredClone(aligned);
     damaged.alignment.units[1].sourceRanges[0].from++;
     assert.deepEqual(projectSourceAnnotationRanges([{ from, to }], viewFor(damaged)), []);
+});
+
+test('maps a partial annotation to its containing verified sentence', () => {
+    const sourceMarkdown = 'The sample was retained. Accuracy improved.';
+    const [block] = collectMarkdownTranslationBlocks(sourceMarkdown);
+    const { units } = createAlignmentPlan(block);
+    const aligned = assembleAlignedBlock(block, [
+        { id: units[0].id, translatedMarkdown: '保留了样本。' },
+        { id: units[1].id, translatedMarkdown: '准确性提高了。' },
+    ], 'zh-CN');
+    const views = createDocumentTranslationViews(
+        sourceMarkdown,
+        [block],
+        [aligned],
+        { targetLanguage: 'zh-CN' }
+    );
+    const firstUnit = views.blockRanges[0].alignmentUnits[0];
+    const from = sourceMarkdown.indexOf('sample');
+    const to = from + 'sample'.length;
+    const projection = projectSourceAnnotation([{ from, to }], {
+        sourceMarkdown,
+        ...views,
+    });
+
+    assert.deepEqual(projection, {
+        ranges: [viewRange(firstUnit)],
+        fallback: 'sentence',
+    });
+    assert.deepEqual(projectSourceAnnotationRanges([{ from, to }], {
+        sourceMarkdown,
+        ...views,
+    }), [viewRange(firstUnit)]);
+
+    const crossing = projectSourceAnnotation([{
+        from,
+        to: sourceMarkdown.indexOf('Accuracy') + 3,
+    }], { sourceMarkdown, ...views });
+    assert.deepEqual(crossing, { ranges: [], fallback: null });
+});
+
+test('maps a partial annotation to its verified sentence group without crossing its boundary', () => {
+    const sourceMarkdown = 'The estimate is 1.2. this remains uncertain. Accuracy improved.';
+    const [block] = collectMarkdownTranslationBlocks(sourceMarkdown);
+    const { units } = createAlignmentPlan(block);
+    const aligned = assembleAlignedBlock(block, [
+        { id: units[0].id, translatedMarkdown: '估计值为 1.2，这仍不确定。' },
+        { id: units[1].id, translatedMarkdown: '准确性提高了。' },
+    ], 'zh-CN');
+    const views = createDocumentTranslationViews(
+        sourceMarkdown,
+        [block],
+        [aligned],
+        { targetLanguage: 'zh-CN' }
+    );
+    const [group, followingSentence] = views.blockRanges[0].alignmentUnits;
+    const partial = sourceMarkdown.indexOf('uncertain');
+    const projection = projectSourceAnnotation([{
+        from: partial,
+        to: partial + 'uncertain'.length,
+    }], { sourceMarkdown, ...views });
+
+    assert.equal(group.sourceKind, 'sentence-group');
+    assert.deepEqual(projection, {
+        ranges: [viewRange(group)],
+        fallback: 'sentence',
+    });
+
+    const crossing = projectSourceAnnotation([{
+        from: partial,
+        to: sourceMarkdown.indexOf('Accuracy') + 3,
+    }], { sourceMarkdown, ...views });
+    assert.deepEqual(crossing, { ranges: [], fallback: null });
+    assert.notDeepEqual(projection.ranges, [viewRange(followingSentence)]);
+});
+
+test('aligns embedded figure captions for annotation projection and translated selection', () => {
+    const sourceMarkdown = '![Figure 1. Flowchart of study selection.](figure.png)';
+    const [block] = collectMarkdownTranslationBlocks(sourceMarkdown);
+    const plan = createAlignmentPlan(block);
+    assert.ok(plan, 'an embedded figure caption needs verified sentence alignment');
+
+    const aligned = assembleAlignedBlock(block, plan.units.map(unit => ({
+        id: unit.id,
+        translatedMarkdown: '研究选择流程图。',
+    })), 'zh-CN');
+    const views = createDocumentTranslationViews(
+        sourceMarkdown,
+        [block],
+        [aligned],
+        { targetLanguage: 'zh-CN' }
+    );
+    const unit = views.blockRanges[0].alignmentUnits[0];
+    const captionFrom = sourceMarkdown.indexOf('Flowchart');
+    const projection = projectSourceAnnotation([{
+        from: captionFrom,
+        to: captionFrom + 'Flowchart'.length,
+    }], { sourceMarkdown, ...views });
+    const selectedTranslation = mapAlignedTranslationSelection({
+        from: unit.translatedFrom + 1,
+        to: unit.translatedTo - 1,
+    }, views.blockRanges, 'translated');
+
+    assert.deepEqual(projection, {
+        ranges: [viewRange(unit)],
+        fallback: 'sentence',
+    });
+    assert.deepEqual(selectedTranslation, [unit]);
+});
+
+test('projects cached caption highlights in Translation and resolves selections in both views', () => {
+    const original = 'Fig. 1. Selection flowchart.';
+    const translated = 'Fig. 1. 研究选择流程图。';
+    for (const gap of ['\n', '\n\n']) {
+        const sourceMarkdown = '![](images/flow.png)' + gap + original;
+        const blocks = collectMarkdownTranslationBlocks(sourceMarkdown);
+        const captionBlock = blocks.find(block => block.translatable);
+        const translation = {
+            id: captionBlock.id,
+            markdown: captionBlock.requestMarkdown.replace('Selection flowchart.', '研究选择流程图。'),
+        };
+        const views = createDocumentTranslationViews(sourceMarkdown, blocks, [translation]);
+        const from = sourceMarkdown.indexOf('flowchart');
+        const projection = projectSourceAnnotation([{ from, to: from + 'flowchart'.length }], { sourceMarkdown, ...views });
+        assert.equal(projection.fallback, 'caption');
+        assert.deepEqual(projection.ranges.map(range => views.translatedMarkdown.slice(range.from, range.to)), [translated]);
+        for (const [view, markdown] of [['translated', views.translatedMarkdown], ['compare', views.comparisonMarkdown]]) {
+            const phrase = markdown.indexOf('选择');
+            const [unit] = mapAlignedTranslationSelection({ from: phrase, to: phrase + 2 }, views.blockRanges, view);
+            assert.deepEqual(unit?.sourceRanges, [{ from: sourceMarkdown.indexOf(original), to: sourceMarkdown.length }]);
+        }
+    }
 });
 
 test('requires every source segment of a split unit without filling gaps in the annotation', () => {

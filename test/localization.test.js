@@ -31,6 +31,16 @@ test('localizes the outdated document translation hint', () => {
         '本地的韩语译文已过时，请重新翻译后阅读。');
 });
 
+test('localizes sentence and caption annotation projection in English and Chinese', () => {
+    const english = createLocalization({ zoteroLocale: 'en-US' });
+    const chinese = createLocalization({ zoteroLocale: 'zh-CN' });
+
+    assert.equal(english.t('viewer.noteSentenceMapped'), 'Located by sentence');
+    assert.equal(chinese.t('viewer.noteSentenceMapped'), '按整句定位');
+    assert.equal(english.t('viewer.noteCaptionMapped'), 'Located by caption');
+    assert.equal(chinese.t('viewer.noteCaptionMapped'), '按整段图注定位');
+});
+
 test('creates a fixed localization from the Zotero locale', () => {
     const localization = createLocalization({ zoteroLocale: 'en-GB' });
     const chinese = createLocalization({ zoteroLocale: 'zh-CN' });

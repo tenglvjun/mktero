@@ -16,6 +16,10 @@ import {
     collectMarkdownTranslationBlocks,
     createDocumentTranslationViews,
 } from '../src/markdown/markdown-translation-blocks.js';
+import {
+    assembleAlignedBlock,
+    createAlignmentPlan,
+} from '../src/markdown/translation-alignment.js';
 
 const MARKDOWN_STYLES = readFileSync(
     new URL('../ui/markdown.css', import.meta.url),
@@ -12655,6 +12659,107 @@ test('a translated sidebar retains unprojectable annotations without highlightin
         assert.equal(link.hasAttribute('disabled'), true);
         assert.match(link.textContent, /sample/);
         assert.doesNotMatch(link.textContent, /Not found in Markdown/);
+    }
+    finally { view.destroy(); }
+});
+
+test('projects a partial PDF annotation to its translated sentence and labels it', () => {
+    const markdown = 'The sample was retained.';
+    const [block] = collectMarkdownTranslationBlocks(markdown);
+    const { units } = createAlignmentPlan(block);
+    const translation = assembleAlignedBlock(block, [{
+        id: units[0].id,
+        translatedMarkdown: '保留了样本。',
+    }], 'zh-CN');
+    const views = createDocumentTranslationViews(
+        markdown,
+        [block],
+        [translation],
+        { targetLanguage: 'zh-CN' }
+    );
+    const sourceFrom = markdown.indexOf('sample');
+    const sourceTo = sourceFrom + 'sample'.length;
+    const annotation = {
+        id: 'pdf-partial',
+        type: 'highlight',
+        text: 'sample',
+        comment: '',
+        color: '#ffd400',
+        pageLabel: '1',
+        ranges: [{ from: sourceFrom, to: sourceTo }],
+    };
+    const { view, shadow } = createView(createModel({
+        status: 'ready',
+        markdown,
+        ...views,
+        translationView: 'translated',
+        translationStatus: 'ready',
+        translationBlocks: [translation],
+        translationBlockRanges: views.blockRanges,
+        annotationOverlay: { matched: [annotation], unmatched: [] },
+    }), {}, {
+        localization: createLocalization({ zoteroLocale: 'zh-CN' }),
+    });
+
+    try {
+        const projected = view.displayedAnnotationOverlay.matched[0];
+        const unit = views.blockRanges[0].alignmentUnits[0];
+        const link = shadow.querySelector('.markdown-note-link');
+        assert.deepEqual(projected.ranges, [{
+            from: unit.translatedFrom,
+            to: unit.translatedTo,
+        }]);
+        assert.equal(projected.translationProjection, 'sentence');
+        assert.equal(link.hasAttribute('disabled'), false);
+        assert.equal(link.getAttribute('data-offset'), String(unit.translatedFrom));
+        assert.equal(
+            link.querySelector('.markdown-note-projection').textContent,
+            '按整句定位'
+        );
+    }
+    finally { view.destroy(); }
+});
+
+test('shows a saved figure caption highlight on the original side in Bilingual', () => {
+    const markdown = '![Fig. 1. Flowchart of study selection.](images/flow.png)';
+    const [block] = collectMarkdownTranslationBlocks(markdown);
+    const caption = '研究选择流程图。';
+    const translations = [{
+        id: block.id,
+        markdown: block.requestMarkdown.replace('Flowchart of study selection.', caption),
+    }];
+    const views = createDocumentTranslationViews(markdown, [block], translations);
+    const text = 'study selection';
+    const from = markdown.indexOf(text);
+    const range = { from, to: from + text.length };
+    const annotation = { id: 'figure', type: 'highlight', text,
+        color: '#ffd400', pageLabel: '3', ranges: [range] };
+    const model = createModel({
+        status: 'ready', markdown, ...views, translationView: 'translated', translationStatus: 'ready',
+        translationBlockRanges: views.blockRanges, translationBlocks: translations,
+        annotationOverlay: { matched: [annotation], unmatched: [] },
+    });
+    const { view, shadow } = createView(model, {}, {
+        localization: createLocalization({ zoteroLocale: 'zh-CN' }),
+    });
+    try {
+        for (const [mode, document, expected] of [
+            ['translated', views.translatedMarkdown, [caption]],
+            ['compare', views.comparisonMarkdown, [text]],
+            ['original', markdown, [text]],
+            ['translated', views.translatedMarkdown, [caption]],
+        ]) {
+            view.render({ ...model, translationView: mode });
+            const [projected] = view.displayedAnnotationOverlay.matched;
+            assert.deepEqual(projected?.ranges.map(({ from, to }) => document.slice(from, to)), expected, mode);
+            const links = shadow.querySelectorAll('.markdown-note-link');
+            assert.equal(links.length, 1, mode);
+            assert.equal(links[0].hasAttribute('disabled'), false, mode);
+            assert.equal(links[0].getAttribute('data-annotation-id'), annotation.id, mode);
+            assert.equal(links[0].querySelector('.markdown-note-projection')?.textContent,
+                mode === 'translated' ? '按整段图注定位' : undefined, mode);
+        }
+        assert.deepEqual(annotation.ranges, [range]);
     }
     finally { view.destroy(); }
 });

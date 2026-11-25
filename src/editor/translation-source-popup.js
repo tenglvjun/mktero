@@ -95,11 +95,12 @@ export function createTranslationSourcePopup(parent, {
 }
 
 function createOriginalResult(document, t, {
-    excerpts, hasSentenceGroup, unavailable, locateSource, blockOnly, canAnnotate,
+    excerpts, hasSentenceGroup, hasWholeCaption, unavailable, locateSource, blockOnly, canAnnotate,
 }, { close, reposition }, copySource) {
     const result = element(document, 'div', 'mktero-selection-translation');
     const label = element(document, 'div', 'mktero-selection-translation-status mktero-translation-source-label');
-    label.textContent = t(hasSentenceGroup ? 'ai.translationSourceGroupLabel' : 'ai.translationSourceLabel');
+    label.textContent = t(hasWholeCaption ? 'ai.translationSourceCaptionLabel'
+        : hasSentenceGroup ? 'ai.translationSourceGroupLabel' : 'ai.translationSourceLabel');
     const scroll = element(document, 'div', 'mktero-translation-source-scroll');
     scroll.tabIndex = 0;
     scroll.setAttribute('role', 'region');

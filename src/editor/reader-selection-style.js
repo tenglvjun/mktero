@@ -69,10 +69,13 @@ export function resolvePointerSelectionPoint(view, event) {
         if (widget) return widgetEdgePoint(view, widget, event) || coordinate;
         const point = documentPoint(view, hit.node, hit.offset);
         if (point) {
+            if (coordinate?.pos === point.pos) return coordinate;
             if (!coordinate || !sameLineBlock(view, coordinate.pos, point.pos)) {
                 return point;
             }
-            return coordinate;
+            // The height map can return the end of the right line for every
+            // position on it. Use the DOM offset when it hits nearby text.
+            return pointerOverHitText(hit, event) ? point : coordinate;
         }
     }
     // No caret hit. The element under the pointer still says which widget or
@@ -307,7 +310,20 @@ function pointerStillOver(node, event) {
     ));
 }
 
-function clientRectsOf(node) {
+function pointerOverHitText({ node, offset }, event) {
+    if (node.nodeType !== TEXT_NODE) return false;
+    // A replayed mousemove can still hit the same text node after scrolling.
+    // Measure the characters adjacent to its reported offset.
+    return clientRectsOf(node, offset)?.some(rect => (
+        rect.right > rect.left && rect.bottom > rect.top
+        && event.clientX >= rect.left - HIT_TOLERANCE
+        && event.clientX <= rect.right + HIT_TOLERANCE
+        && event.clientY >= rect.top - HIT_TOLERANCE
+        && event.clientY <= rect.bottom + HIT_TOLERANCE
+    )) || false;
+}
+
+function clientRectsOf(node, offset = null) {
     try {
         if (node.nodeType === ELEMENT_NODE) {
             return typeof node.getClientRects === 'function'
@@ -316,7 +332,11 @@ function clientRectsOf(node) {
         }
         const range = node.ownerDocument?.createRange?.();
         if (!range || typeof range.getClientRects !== 'function') return null;
-        range.selectNodeContents(node);
+        if (offset === null) range.selectNodeContents(node);
+        else {
+            range.setStart(node, Math.max(0, offset - 1));
+            range.setEnd(node, Math.min(node.textContent.length, offset + 1));
+        }
         return Array.from(range.getClientRects());
     }
     catch {
