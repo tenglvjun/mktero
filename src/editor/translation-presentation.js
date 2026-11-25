@@ -31,17 +31,24 @@ export function applyTranslationPresentation(element, value) {
 }
 
 // blockRanges is the current view index, not the stored translation records.
-// Its alignmentUnits are present only after source and reassembly verification.
+// Its units are verified sentences or structurally paired figure captions.
 export function projectSourceAnnotationRanges(ranges, options) {
+    return projectSourceAnnotation(ranges, options).ranges;
+}
+
+// Project source ranges into the Translation view and report the granularity of a fallback.
+export function projectSourceAnnotation(ranges, options) {
     const {
         sourceMarkdown, translatedMarkdown, blockRanges, groupedPDFSelection, getSourceTextIndex,
     } = options || {};
     if (typeof sourceMarkdown !== 'string' || typeof translatedMarkdown !== 'string'
-        || !Array.isArray(ranges) || !Array.isArray(blockRanges)) return [];
+        || !Array.isArray(ranges) || !Array.isArray(blockRanges)) {
+        return { ranges: [], fallback: null };
+    }
 
     const selected = ranges.filter(range => boundedRange(range?.from, range?.to, 0, sourceMarkdown.length))
         .sort(compareRanges);
-    if (!selected.length) return [];
+    if (!selected.length) return { ranges: [], fallback: null };
     const coverage = [];
     // Prefix maxima let us binary-search the first overlap without merging
     // the original segments used for verbatim projection.
@@ -78,9 +85,13 @@ export function projectSourceAnnotationRanges(ranges, options) {
     };
 
     const projected = [];
+    let fallback = null;
     for (const block of blockRanges) {
         if (!block) continue;
-        const { sourceFrom, sourceTo, translatedFrom, translatedTo } = block;
+        const caption = block.figureCaption;
+        const sourceFrom = caption?.sourceRanges?.[0]?.from ?? block.sourceFrom;
+        const sourceTo = caption?.sourceRanges?.[0]?.to ?? block.sourceTo;
+        const { translatedFrom, translatedTo } = caption || block;
         if (!boundedRange(sourceFrom, sourceTo, 0, sourceMarkdown.length)
             || !boundedRange(translatedFrom, translatedTo, 0, translatedMarkdown.length)
             || sourceTo <= coverage[0].from || sourceFrom >= coverage.at(-1).to) continue;
@@ -99,6 +110,10 @@ export function projectSourceAnnotationRanges(ranges, options) {
                 });
             }
         }
+        else if (caption && block.alignmentUnits?.[0]?.sourceKind === 'caption') {
+            projected.push({ from: translatedFrom, to: translatedTo });
+            fallback = 'caption';
+        }
         else if (covers(sourceFrom, sourceTo) || coversVisibleBlock(source, sourceFrom, covers)) {
             projected.push({ from: translatedFrom, to: translatedTo });
         }
@@ -106,17 +121,28 @@ export function projectSourceAnnotationRanges(ranges, options) {
             for (const unit of block.alignmentUnits) {
                 const from = unit?.translatedFrom;
                 const to = unit?.translatedTo;
-                if (typeof unit?.id === 'string' && unit.id
-                    && boundedRange(from, to, translatedFrom, translatedTo)
-                    && coversSourceUnit(unit.sourceRanges, sourceFrom, sourceTo, covers)) {
+                if (typeof unit?.id !== 'string' || !unit.id
+                    || !boundedRange(from, to, translatedFrom, translatedTo)) continue;
+                if (coversSourceUnit(unit.sourceRanges, sourceFrom, sourceTo, covers)) {
                     projected.push({ from, to });
+                }
+                else if (selectionWithinSourceUnit(
+                    selected,
+                    unit.sourceRanges,
+                    sourceFrom,
+                    sourceTo,
+                    Boolean(caption)
+                )) {
+                    projected.push({ from, to });
+                    fallback ||= 'sentence';
                 }
             }
         }
     }
-    return projected.sort(compareRanges).filter((range, index) => (
+    const unique = projected.sort(compareRanges).filter((range, index) => (
         index === 0 || compareRanges(projected[index - 1], range) !== 0
     ));
+    return { ranges: unique, fallback };
 }
 
 function boundedRange(from, to, lower, upper) {
@@ -146,6 +172,20 @@ function coversSourceUnit(ranges, lower, upper, covers) {
             || !covers(range.from, range.to)) return false;
     }
     return true;
+}
+
+function selectionWithinSourceUnit(selection, ranges, blockFrom, blockTo, clipToCaption) {
+    if (!Array.isArray(ranges) || ranges.length !== 1 || !selection.length) return false;
+    const [sourceRange] = ranges;
+    if (!boundedRange(sourceRange?.from, sourceRange?.to, blockFrom, blockTo)) return false;
+    const inBlock = selection.filter(selected => (
+        selected.from < blockTo && selected.to > blockFrom
+    ));
+    return inBlock.length > 0 && inBlock.every(selected => {
+        const from = clipToCaption ? Math.max(selected.from, blockFrom) : selected.from;
+        const to = clipToCaption ? Math.min(selected.to, blockTo) : selected.to;
+        return from >= sourceRange.from && to <= sourceRange.to;
+    });
 }
 
 function coversVisibleBlock(source, offset, covers) {

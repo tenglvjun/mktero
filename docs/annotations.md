@@ -16,6 +16,8 @@ A local highlight not yet in the PDF has a dashed underline. A failed sync has a
 
 The left column's `Annotations` segment lists the paper's annotations. It offers search, a color filter, a jump to the Markdown position, `View in PDF`, delete, `Retry Zotero sync` for a local highlight, and `Add to Note`.
 
+In Bilingual, saved annotations on body text and figure captions appear only on the original side. In Translation, an existing PDF annotation that covers part of a verified source sentence or sentence group highlights the complete translated unit and is marked `Located by sentence`. When a saved figure caption translation can be paired only by its figure label and image path, the highlight spans the caption text and the sidebar shows `Located by caption`.
+
 ## Zotero notes beside the reader
 
 The left column has `Headings`, `Figures`, and `Annotations`. The right column is `Notes`, with two tabs:

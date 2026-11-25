@@ -1,5 +1,5 @@
 import { createInlineMarkdownEditor } from '../editor/inline-markdown-editor.js';
-import { projectSourceAnnotationRanges } from '../editor/translation-presentation.js';
+import { projectSourceAnnotation } from '../editor/translation-presentation.js';
 import { searchMarkdownDocument } from '../markdown/markdown-document-search.js';
 import { navigationShortcutLabels } from './reader-shortcuts.js';
 import {
@@ -915,10 +915,7 @@ class MarkdownTabView {
                 const annotationOverlay = translatedView
                     ? translatedAnnotationOverlay(model, markdown)
                     : comparisonView
-                        ? mapAnnotationOverlayToComparison(
-                            model.annotationOverlay,
-                            model.translationBlockRanges
-                        )
+                        ? mapAnnotationOverlayToComparison(model.annotationOverlay, model.translationBlockRanges)
                         : model.annotationOverlay || createEmptyAnnotationOverlay();
                 const sourceMap = translatedView
                     ? []
@@ -8463,6 +8460,14 @@ class MarkdownTabView {
                 this.t('annotation.page', { page: pageLabel })
             ));
         }
+        if (canJump && annotation.translationProjection) {
+            metadata.appendChild(this.createElement(
+                'span',
+                { class: 'markdown-note-projection' },
+                this.t(annotation.translationProjection === 'caption'
+                    ? 'viewer.noteCaptionMapped' : 'viewer.noteSentenceMapped')
+            ));
+        }
         if (!canJump) {
             metadata.appendChild(this.createElement(
                 'span',
@@ -8929,8 +8934,9 @@ export function createVisibleTranslationPairs(model, translatedView, comparisonV
         // Keep canonical source coordinates in every translated view. The
         // Translation view does not render them, but its bubble and annotation
         // action still need to resolve back into the source Markdown.
-        const sourceFrom = range?.sourceFrom;
-        const sourceTo = range?.sourceTo;
+        const caption = !failed ? range?.figureCaption : null;
+        const sourceFrom = caption?.sourceRanges[0].from ?? range?.sourceFrom;
+        const sourceTo = caption?.sourceRanges[0].to ?? range?.sourceTo;
         const validSource = Number.isSafeInteger(sourceFrom)
             && Number.isSafeInteger(sourceTo)
             && sourceTo > sourceFrom;
@@ -8938,10 +8944,10 @@ export function createVisibleTranslationPairs(model, translatedView, comparisonV
         // In Bilingual the source side is comparisonMarkdown; in Translation
         // there is no source side to decorate.
         const sourceViewFrom = comparisonView
-            ? range?.comparisonSourceFrom
+            ? caption?.comparisonSourceRanges[0].from ?? range?.comparisonSourceFrom
             : null;
         const sourceViewTo = comparisonView
-            ? range?.comparisonSourceTo
+            ? caption?.comparisonSourceRanges[0].to ?? range?.comparisonSourceTo
             : null;
         // A protected display equation appears once in both reading views.
         // Keep its exact position for the original shown in a cross-block drag.
@@ -8958,15 +8964,16 @@ export function createVisibleTranslationPairs(model, translatedView, comparisonV
         }
         // A failure still needs its range for retry navigation, but the
         // fallback is original text, not a translated selection target.
+        const passage = caption || range;
         const translatedFrom = translatedView
-            ? range?.translatedFrom
+            ? passage?.translatedFrom
             : comparisonView
-                ? range?.comparisonTranslationFrom
+                ? passage?.comparisonTranslationFrom
                 : null;
         const translatedTo = translatedView
-            ? range?.translatedTo
+            ? passage?.translatedTo
             : comparisonView
-                ? range?.comparisonTranslationTo
+                ? passage?.comparisonTranslationTo
                 : null;
         const validSourceView = Number.isSafeInteger(sourceViewFrom)
             && Number.isSafeInteger(sourceViewTo)
@@ -9002,14 +9009,20 @@ function translatedAnnotationOverlay(model, translatedMarkdown) {
     };
     let sourceTextIndex;
     for (const annotation of source.matched || []) {
-        const ranges = projectSourceAnnotationRanges(annotation.ranges, {
+        const { ranges, fallback } = projectSourceAnnotation(annotation.ranges, {
             ...projection,
             groupedPDFSelection: annotation.pdfAnnotationParts?.length > 1,
             getSourceTextIndex: () => (sourceTextIndex ||= createVisibleMarkdownTextIndex(
                 model.markdown, model.chromeRanges || [], { imageMath: true }
             )),
         });
-        if (ranges.length) matched.push({ ...annotation, ranges });
+        if (ranges.length) {
+            matched.push({
+                ...annotation,
+                ranges,
+                ...(fallback ? { translationProjection: fallback } : {}),
+            });
+        }
         else unmatched.push({ ...annotation, ranges: [], reason: 'translation-unmapped' });
     }
     return { matched, unmatched };

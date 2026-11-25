@@ -158,6 +158,17 @@ function validReaderRange(range, bounds) {
 }
 
 function translatedSelectionRanges(view, range) {
+    const startElement = range.startContainer.nodeType === 1
+        ? range.startContainer
+        : range.startContainer.parentElement;
+    const endElement = range.endContainer.nodeType === 1
+        ? range.endContainer
+        : range.endContainer.parentElement;
+    const startCaption = startElement?.closest?.('figcaption');
+    const endCaption = endElement?.closest?.('figcaption');
+    if (startCaption && startCaption === endCaption) {
+        return selectedMarkdownAnnotation(view, [])?.ranges || [];
+    }
     // A replacement widget has no character positions in CodeMirror. Map
     // selected cells independently, leaving unconfirmed cells out of the hit.
     const tables = [...view.contentDOM.querySelectorAll(
@@ -243,7 +254,7 @@ function normalizeReaderAlignmentUnits(pair, translatedBounds, compare, sourceLe
             return [];
         }
         return [{ ...translated, id: unit.id, source, comparison,
-            ...(unit.sourceKind === 'sentence-group' ? { sourceKind: unit.sourceKind } : {}),
+            ...(['sentence-group', 'caption'].includes(unit.sourceKind) ? { sourceKind: unit.sourceKind } : {}),
         }];
     }).sort((left, right) => left.from - right.from);
 }
@@ -1641,6 +1652,7 @@ export function createInlineMarkdownEditor({
             anchor: active.anchor,
             excerpts,
             hasSentenceGroup: excerpts.some(excerpt => excerpt.sourceKind === 'sentence-group'),
+            hasWholeCaption: excerpts.some(excerpt => excerpt.sourceKind === 'caption'),
             unavailable: excerpts.length ? unavailable : t('ai.translationSourceUnmapped'),
             selection,
             selectionContext: {

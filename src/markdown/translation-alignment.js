@@ -13,7 +13,7 @@ const TITLE_ABBREVIATION = /\b(?:dr|prof|mr|mrs|ms|st)$/iu;
 const INITIALS = /(?:^|[^\p{L}\p{N}.])(?:[A-Z]\.)*[A-Z]$/u;
 const DOTTED_ABBREVIATION = /(?:^|[^\p{L}\p{N}.])(?:\p{L}+\.)+\p{L}+$/u;
 const UNIT_ABBREVIATION = /\d[\d.,]*[ \t]*(?:ms|s|min|h|sec|hrs?|cm|mm|km|g|kg|mol|mL)$/iu;
-const WRAPPERS = new Set(['Emphasis', 'StrongEmphasis', 'Strikethrough', 'Link', 'Image']);
+const WRAPPERS = new Set(['Emphasis', 'StrongEmphasis', 'Strikethrough', 'Link']);
 const OPAQUE = new Set(['InlineCode', 'URL', 'Autolink', 'Escape', 'Entity']);
 const STRUCTURE = new Set([
     'BulletList', 'OrderedList', 'ListItem', 'ListMark', 'Paragraph', 'Task', 'TaskMarker',
@@ -38,17 +38,41 @@ function planAlignment(block) {
     }))]);
     const fullyProtected = new Set(protection.edits.map(edit => `${edit.restoredFrom}:${edit.restoredTo}`));
     const preservedImages = layout.images.filter(image => fullyProtected.has(`${image.from}:${image.to}`));
-    // A partly protected image has a translatable alt or caption. Do not
-    // claim that its image wrapper and its description are one sentence.
-    if (preservedImages.length !== layout.images.length
-        || layout.sections.some(section => hasHardBreak(source, section, opaque))) return null;
+    const captionImages = layout.images.filter(image => !preservedImages.includes(image));
+    const captionSections = new Map();
+    for (const image of captionImages) {
+        const sectionIndex = layout.sections.findIndex(section => imageOnlyInSection(source, image, section));
+        if (sectionIndex < 0 || !image.description) return null;
+        captionSections.set(image, sectionIndex);
+    }
+    if (layout.sections.some(section => hasHardBreak(source, section, opaque))) return null;
     const candidates = [];
+    const isolatedImages = [...preservedImages, ...captionImages]
+        .sort((left, right) => left.from - right.from);
     for (const [index, section] of layout.sections.entries()) {
-        for (const prose of excludeImageLines(source, section, preservedImages)) {
+        for (const prose of excludeImageLines(source, section, isolatedImages)) {
             const spans = sentenceRanges(source, prose, opaque, layout.closers, layout.wrappers);
             for (const span of spans) candidates.push({ index, ...span });
         }
     }
+    for (const [image, index] of captionSections) {
+        const description = imageDescriptionBodyRange(image.description, protection.edits);
+        if (!description) return null;
+        const captionOpaque = mergeOverlappingRanges([
+            ...layout.opaque.filter(range => (
+                range.to <= image.from || range.from >= image.to
+            )),
+            ...protection.edits.flatMap(edit => {
+                const from = Math.max(description.from, edit.restoredFrom);
+                const to = Math.min(description.to, edit.restoredTo);
+                return to > from ? [{ from, to }] : [];
+            }),
+        ]);
+        const spans = sentenceRanges(source, description, captionOpaque, layout.closers, layout.wrappers);
+        for (const span of spans) candidates.push({ index, ...span });
+    }
+    candidates.sort((left, right) => left.range.from - right.range.from
+        || left.range.to - right.range.to);
     const reverseEdits = protection.edits.map(edit => ({
         from: edit.restoredFrom,
         to: edit.restoredTo,
@@ -124,13 +148,13 @@ function readLayout(source, nodeType) {
         if (name === 'Task' && parent === 'ListItem') {
             sections.push({ from: node.firstChild.to, to });
         }
+        if (name === 'Image') {
+            images.push({ from, to, description: imageDescriptionRange(node) });
+            opaque.push({ from, to });
+            return false;
+        }
         if (WRAPPERS.has(name)) {
             wrappers.push({ from, to });
-            if (name === 'Image') {
-                images.push({ from, to });
-                opaque.push({ from, to });
-                return false;
-            }
             const close = name === 'Link'
                 ? children(node).filter(child => child.name === 'LinkMark')[1]
                 : node.lastChild;
@@ -162,6 +186,42 @@ function children(node) {
     const result = [];
     for (let child = node.firstChild; child; child = child.nextSibling) result.push(child);
     return result;
+}
+
+export function imageDescriptionRange(image) {
+    const marks = children(image).filter(node => node.name === 'LinkMark');
+    return marks.length >= 2 && marks[0].to <= marks[1].from
+        ? { from: marks[0].to, to: marks[1].from }
+        : null;
+}
+
+function sameImageShells(source, translated, sourceImages, translatedImages) {
+    if (sourceImages.length !== translatedImages.length) return false;
+    return sourceImages.every((image, index) => {
+        const translatedImage = translatedImages[index];
+        if (!image.description || !translatedImage.description) {
+            return source.slice(image.from, image.to)
+                === translated.slice(translatedImage.from, translatedImage.to);
+        }
+        return source.slice(image.from, image.description.from)
+                === translated.slice(translatedImage.from, translatedImage.description.from)
+            && source.slice(image.description.to, image.to)
+                === translated.slice(translatedImage.description.to, translatedImage.to);
+    });
+}
+
+function imageOnlyInSection(source, image, section) {
+    return image.from >= section.from && image.to <= section.to
+        && !source.slice(section.from, image.from).trim()
+        && !source.slice(image.to, section.to).trim();
+}
+
+function imageDescriptionBodyRange(description, edits) {
+    let from = description.from;
+    for (const edit of edits) {
+        if (edit.restoredFrom <= from && edit.restoredTo > from) from = edit.restoredTo;
+    }
+    return from < description.to ? { from, to: description.to } : null;
 }
 
 function headerWidth(header) {
@@ -380,6 +440,7 @@ function assemble(block, planned, returnedUnits, separator) {
     const restoredRanges = projectMarkdownRanges(protectedRanges, protection.edits);
     const layout = readLayout(protection.markdown, block.nodeType);
     if (!layout || !sameItems(layout.shape, planned.layout.shape)
+        || !sameImageShells(block.markdown, protection.markdown, planned.layout.images, layout.images)
         || layout.sections.length !== planned.layout.sections.length
         || restoredRanges.some((range, index) => {
             const section = layout.sections[planned.sections[index]];

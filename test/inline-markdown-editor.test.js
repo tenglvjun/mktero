@@ -12,9 +12,11 @@ import {
 import { visibleDocumentChromeRanges } from '../src/markdown/chrome-ranges.js';
 import { normalizeMarkdownFigureCaptions } from '../src/markdown/markdown-figures.js';
 import { createInlineMarkdownEditor } from '../src/editor/inline-markdown-editor.js';
+import { projectSourceAnnotationRanges } from '../src/editor/translation-presentation.js';
 import {
     collectMarkdownTranslationBlocks,
     createDocumentTranslationViews,
+    mapSourceRangeToComparison,
 } from '../src/markdown/markdown-translation-blocks.js';
 import {
     assembleAlignedBlock,
@@ -13745,6 +13747,89 @@ function alignedTranslationFor(block, translatedSentences) {
 
 function selectedSourceMarks(document) {
     return [...document.querySelectorAll('.cm-mktero-translation-pair-selected-text')];
+}
+
+for (const view of ['translated', 'compare']) {
+    test(`maps a selection inside a translated figure caption to its source sentence in ${view}`, async t => {
+        const original = 'Flowchart of study selection.';
+        const translated = '研究选择流程图。';
+        const source = '![Figure 1. ' + original + ' Participants were screened.](images/figure.png)';
+        const created = [];
+        const { dom, document } = openTranslationSelectionEditor(
+            t,
+            source,
+            [[translated, '筛查了参与者。']],
+            view,
+            {
+                createMarkdownAnnotation: async (annotation, selectionContext) => {
+                    created.push({ annotation, selectionContext });
+                    return annotation;
+                },
+                resolveImageURL: () => 'blob:mktero-translated-caption',
+            }
+        );
+        assert.equal(document.querySelectorAll('.cm-content img').length, 1);
+        selectEditorText(dom, document, '选择');
+        await settleFrame(dom.window);
+        await settle();
+
+        const popup = translationResult(document);
+        assert.equal(
+            popup.querySelector('.mktero-translation-source-text')?.textContent,
+            original
+        );
+        const create = popup.querySelector('[data-color="#ffd400"]');
+        assert.ok(create, view);
+        create.click();
+        await settle();
+        await settle();
+        assert.deepEqual(created[0]?.annotation.ranges, [{
+            from: source.indexOf(original),
+            to: source.indexOf(original) + original.length,
+        }]);
+        assert.deepEqual(created[0]?.selectionContext, {
+            side: 'source',
+            rangesAreSource: true,
+        });
+    });
+
+    test(`highlights and annotates a cached figure caption in ${view}`, async t => {
+        const original = 'Flowchart of study selection.';
+        const translated = '研究选择流程图。';
+        const source = '![Fig. 1. ' + original + '](images/figure.png)';
+        const [block] = collectMarkdownTranslationBlocks(source);
+        const created = [];
+        const { dom, document, editor, views, documentOptions } = openTranslationSelectionEditor(
+            t, source, [block.requestMarkdown.replace(original, translated)], view, {
+                createMarkdownAnnotation: async draft => { created.push(draft); return draft; },
+                resolveImageURL: () => 'blob:mktero-cached-caption',
+            }
+        );
+        const compare = view === 'compare';
+        const annotated = 'study selection';
+        const from = source.indexOf(annotated);
+        const range = { from, to: from + annotated.length };
+        const ranges = compare ? [mapSourceRangeToComparison(range, views.blockRanges)]
+            : projectSourceAnnotationRanges([range], { sourceMarkdown: source, ...views });
+        editor.setDocument(documentOptions(view, {
+            annotationOverlay: { matched: [{
+                id: 'cached-figure-annotation', type: 'highlight', color: '#ffd400', ranges,
+            }], unmatched: [] },
+        }));
+        const highlight = document.querySelector('figcaption .cm-mktero-pdf-annotation');
+        assert.equal(highlight?.textContent, compare ? annotated : translated);
+
+        selectEditorText(dom, document, '流程图');
+        await settleFrame(dom.window);
+        const popup = translationResult(document);
+        assert.equal(popup.querySelector('.mktero-translation-source-text')?.textContent, original);
+        assert.match(popup.querySelector('.mktero-translation-source-label')?.textContent, /full caption/u);
+        popup.querySelector('[data-color="#ffd400"]').click();
+        await settle();
+        await settle();
+        const originalFrom = source.indexOf(original);
+        assert.deepEqual(created[0]?.ranges, [{ from: originalFrom, to: originalFrom + original.length }]);
+    });
 }
 
 for (const view of ['compare', 'translated']) {

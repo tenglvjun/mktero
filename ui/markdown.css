@@ -922,6 +922,11 @@ main {
     color: var(--warning);
 }
 
+.markdown-note-projection {
+    margin-left: auto;
+    color: var(--muted);
+}
+
 .markdown-note-sync {
     display: inline-flex;
     min-width: 0;

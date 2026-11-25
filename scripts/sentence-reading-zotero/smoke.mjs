@@ -54,7 +54,8 @@ export async function runSmoke(config) {
         const sourceText = () => root.querySelector('.mktero-translation-source-text')?.textContent;
         const marks = () => [...root.querySelectorAll('.cm-mktero-translation-pair-selected-text')].map(node => node.textContent);
         const excerpt = fixture.units[1].slice(1, -2);
-        for (const view of ['translated', 'compare']) {
+        const caption = fixture.kind === 'caption';
+        for (const view of caption ? ['compare', 'translated'] : ['translated', 'compare']) {
             await stage(`${fixture.kind} / ${view}`);
             selection().removeAllRanges();
             await changeView(view);
@@ -66,11 +67,12 @@ export async function runSmoke(config) {
             if (fixture.kind !== 'unaligned') {
                 check(colors.length === 8 && popup.querySelector('[data-action="add-note"]'), 'Missing shared selection toolbar');
                 check(sourceText() === fixture.sentences[1] && !colors[0].disabled, 'Incorrect automatic sentence match');
+                if (caption) check(/full caption|整段图注/.test(popup.textContent), 'Missing full-caption label');
                 if (view === 'translated') {
                     mouseClick(popup.querySelector('[data-action="locate-source"]'));
                     await wait(() => viewButton('original').getAttribute('aria-checked') === 'true', 'locate original view');
                 }
-                else check(marks().join('') === fixture.sentences[1], 'Incorrect bilingual source marks');
+                else if (!caption) check(marks().join('') === fixture.sentences[1], 'Incorrect bilingual source marks');
             }
             else {
                 const locate = popup.querySelector('[data-action="locate-source"]');
@@ -167,7 +169,7 @@ export async function runSmoke(config) {
             const mixed = fixture.kind === 'mixed';
             await stage(`${fixture.kind} / save displayed source`);
             selection().removeAllRanges();
-            await changeView('translated');
+            await changeView(caption ? 'compare' : 'translated');
             const sidebar = root.querySelector('#mktero-annotations');
             const sidebarTab = root.querySelector('#mktero-outline-segment-annotations');
             const sidebarToggle = root.querySelector('#mktero-outline-toggle');
@@ -262,6 +264,11 @@ export async function runSmoke(config) {
                 const text = normalize(nodes.map(node => node.textContent).join(''));
                 const expected = view === 'translated' ? fixture.units[1] : fixture.sentences[1];
                 check(text === expected, `${view}: expected highlighted text ${JSON.stringify(expected)}; got ${JSON.stringify(text)}`);
+                if (caption) {
+                    const label = rows()[0].querySelector('.markdown-note-projection');
+                    check(view === 'translated' ? /Located by caption|按整段图注定位/.test(label?.textContent) : !label,
+                        `${view}: unexpected caption projection label`);
+                }
                 check(!hasTemporarySelection(), `${view}: temporary selection still visible`);
                 const fills = [...new Set(nodes.map(node => win.getComputedStyle(node).backgroundColor))];
                 for (const fill of fills) {

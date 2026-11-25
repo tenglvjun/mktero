@@ -77,6 +77,34 @@ test('keeps the coordinate side when it already names the hit line', () => {
     assert.equal(point.assoc, -1);
 });
 
+test('drags through measured text when CodeMirror reports the same line end for both pointers', () => {
+    const caption = textNode(10, '图注译文内容');
+    caption.ownerDocument = {
+        createRange() {
+            let from = 0;
+            let to = caption.textContent.length;
+            return {
+                selectNodeContents() {},
+                setStart(_node, offset) { from = offset; },
+                setEnd(_node, offset) { to = offset; },
+                getClientRects: () => [{
+                    top: 830, bottom: 850, left: 400 + from * 10, right: 400 + to * 10,
+                }],
+            };
+        },
+    };
+    const view = viewWith({ coordinatePos: 16 });
+    view.posAtDOM = (node, offset) => node.pos + offset;
+    const style = readerPointerSelectionStyle(view, pointerEvent(caption, 1, { clientX: 410 }));
+    const selection = style.get(pointerEvent(caption, 4, { clientX: 440 }), false, false);
+
+    assert.equal(selection.main.from, 11);
+    assert.equal(selection.main.to, 14);
+    // Autoscroll can replay a rangeParent offset that no longer hits the pointer.
+    const stale = resolvePointerSelectionPoint(view, pointerEvent(caption, 1, { clientX: 458 }));
+    assert.deepEqual(stale, { pos: 16, assoc: -1 });
+});
+
 test('a drag across a wrapped line includes the text under the pointer', () => {
     const startText = textNode(48);
     const endText = textNode(130);

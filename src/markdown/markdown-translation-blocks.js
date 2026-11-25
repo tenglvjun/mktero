@@ -2,7 +2,7 @@ import { analyzeDocumentFigures } from '../figures/figure-analysis.js';
 import {
     findDisplayMathMatches,
     findInlineMathMatches,
-    unescapeImageCaptionMath,
+    imageCaptionMathEdits,
 } from './markdown-html.js';
 import { analyzeMarkdownCitations } from './markdown-citations.js';
 import {
@@ -14,6 +14,7 @@ import {
 import { normalizeChromeRanges } from './chrome-ranges.js';
 import { REFERENCE_HEADING_LABEL_PATTERN } from './reference-heading.js';
 import {
+    imageDescriptionRange,
     projectMarkdownRanges,
     PROTECTED_PLACEHOLDER_PATTERN,
     protectedContentChangedError,
@@ -86,15 +87,11 @@ export function collectMarkdownTranslationBlocks(markdown, { chromeRanges } = {}
             referenceSection = false;
         }
         const type = translationBlockType(node.name);
-        const protectedRanges = collectProtectedRanges(
-            node,
-            blockMarkdown,
-            interactiveRangesForNode(
-                interactiveRanges,
-                interactiveRangeIndex,
-                node
-            )
-        );
+        const labelsAndReferences = interactiveRangesForNode(interactiveRanges, interactiveRangeIndex, node);
+        const captionLabel = node.name === 'Paragraph' && labelsAndReferences.find(range => (
+            range.figureCaption && source.slice(range.from, node.to).trimEnd() === range.figureCaption
+        ));
+        const protectedRanges = collectProtectedRanges(node, blockMarkdown, labelsAndReferences);
         while (interactiveRangeIndex < interactiveRanges.length
             && interactiveRanges[interactiveRangeIndex].from < node.to) {
             interactiveRangeIndex++;
@@ -130,6 +127,9 @@ export function collectMarkdownTranslationBlocks(markdown, { chromeRanges } = {}
             markdown: blockMarkdown,
             requestMarkdown: requestBlock.markdown,
             protectedFragments: requestBlock.fragments,
+            ...(captionLabel ? {
+                captionLine: { from: captionLabel.from - node.from, labelTo: captionLabel.to - node.from },
+            } : {}),
             ...documentMarkers,
             translatable,
         });
@@ -500,12 +500,20 @@ function createComparisonView(markdown, blocks, translations, alignedByID) {
                 cursor = block.to;
                 continue;
             }
+            const aligned = alignedByID?.get(block.id);
+            const caption = alignedByID && source.slice(block.from, block.to) === block.markdown
+                ? pairFigureCaptions(block, restored)
+                : null;
+            // The entire caption starts at or before its individual alignment units.
+            const inputRanges = caption ? [caption.translated, ...(aligned?.restoredRanges || [])]
+                : aligned?.restoredRanges;
             const { markdown: translated, ranges } = removeRepeatedComparisonImages(
                 restored,
                 block,
-                alignedByID?.get(block.id)?.restoredRanges
+                inputRanges
             );
-            if (ranges) alignmentRanges.set(block.id, ranges);
+            if (aligned) alignmentRanges.set(block.id, caption ? ranges.slice(1) : ranges);
+            if (caption) blockRange.figureCaption = { ...caption, comparison: ranges[0] };
             if (translated.trim()) {
                 const boundary = block.type === 'list'
                     ? `\n${BILINGUAL_LIST_BOUNDARY}\n\n`
@@ -550,11 +558,14 @@ export function createDocumentTranslationViews(markdown, blocks, translations, {
     const comparison = createComparisonView(markdown, blocks, translations, alignedByID);
     const comparisonByID = new Map(comparison.blockRanges.map(range => [range.id, range]));
     const blockRanges = translated.blockRanges.map(range => {
-        const combined = { ...range, ...comparisonByID.get(range.id) };
+        const { figureCaption, ...comparisonRange } = comparisonByID.get(range.id);
+        const combined = { ...range, ...comparisonRange };
         const aligned = alignedByID.get(range.id);
+        if (figureCaption) combined.figureCaption = projectFigureCaption(combined, figureCaption);
         if (aligned) combined.alignmentUnits = projectAlignmentUnits(
             combined, aligned, comparison.alignmentRanges.get(range.id)
         );
+        else if (combined.figureCaption) combined.alignmentUnits = [combined.figureCaption];
         return combined;
     });
     return {
@@ -591,6 +602,19 @@ function projectAlignmentUnits(block, aligned, comparisonRanges) {
 
 function offsetRange({ from, to }, offset) {
     return { from: from + offset, to: to + offset };
+}
+
+function projectFigureCaption(block, { source, translated, comparison }) {
+    return {
+        id: block.id + ':caption',
+        sourceKind: 'caption',
+        sourceRanges: [offsetRange(source, block.sourceFrom)],
+        comparisonSourceRanges: [offsetRange(source, block.comparisonSourceFrom)],
+        translatedFrom: block.translatedFrom + translated.from,
+        translatedTo: block.translatedFrom + translated.to,
+        comparisonTranslationFrom: comparison ? block.comparisonTranslationFrom + comparison.from : null,
+        comparisonTranslationTo: comparison ? block.comparisonTranslationFrom + comparison.to : null,
+    };
 }
 
 export function mapAlignedTranslationSelection(range, blockRanges, view) {
@@ -934,23 +958,26 @@ function collectInteractiveRanges(markdown) {
     return [
         ...citations.citations,
         ...figures.references,
-        ...figures.targets.flatMap(target => targetLabelRange(target)),
+        ...figures.targets.flatMap(target => targetLabelRange(target, { figure: true })),
         ...tables.references,
         ...tables.targets.flatMap(target => targetLabelRange(target)),
     ].sort((left, right) => left.from - right.from || left.to - right.to);
 }
 
-function targetLabelRange(target) {
+function targetLabelRange(target, { figure = false } = {}) {
     if (!Number.isSafeInteger(target?.labelFrom)
         || !Number.isSafeInteger(target?.labelTo)
         || target.labelFrom < 0
         || target.labelTo <= target.labelFrom) {
         return [];
     }
+    const figureCaption = figure && target.labelFrom >= target.from && target.labelFrom + target.caption.length <= target.to
+        ? target.caption : null;
     return [{
         from: target.labelFrom,
         to: target.labelTo,
         translatableImageDescription: true,
+        ...(figureCaption ? { figureCaption } : {}),
     }];
 }
 
@@ -979,16 +1006,13 @@ function translatableImageWrapperRanges(image, blockFrom, interactiveRanges) {
         rangeIndex++;
     }
     if (!translatesDescription) return null;
-    const marks = [];
-    for (let child = image.firstChild; child; child = child.nextSibling) {
-        if (child.name === 'LinkMark') marks.push(child);
-    }
-    if (marks.length < 2 || marks[0].to > marks[1].from) return null;
+    const description = imageDescriptionRange(image);
+    if (!description) return null;
     return [{
         from: image.from - blockFrom,
-        to: marks[0].to - blockFrom,
+        to: description.from - blockFrom,
     }, {
-        from: marks[1].from - blockFrom,
+        from: description.to - blockFrom,
         to: image.to - blockFrom,
     }];
 }
@@ -1325,6 +1349,44 @@ function isReferenceHeading(nodeName, markdown) {
     return REFERENCE_HEADING_LABEL_PATTERN.test(label);
 }
 
+function pairFigureCaptions(block, translated) {
+    const source = block.markdown;
+    if (block.captionLine) {
+        const { from, labelTo } = block.captionLine;
+        // A caption can share a Markdown paragraph with the image above it.
+        const preceding = source.slice(0, from).trim();
+        if ((preceding && !standaloneImageDescription(preceding))
+            || !translated.startsWith(source.slice(0, labelTo)) || !translated.slice(labelTo).trim()) return null;
+        return { source: { from, to: source.length }, translated: { from, to: translated.length } };
+    }
+    if (block.nodeType !== 'Paragraph' || !source.startsWith('![') || !translated.startsWith('![')) return null;
+    const sourceDescription = standaloneImageDescription(source);
+    const translatedDescription = standaloneImageDescription(translated);
+    if (!sourceDescription || !translatedDescription) return null;
+
+    // A cached block can lack sentence IDs. Its protected figure label and
+    // destination still identify the complete caption within this block.
+    const prefix = block.protectedFragments[0]?.markdown || '';
+    const suffix = block.protectedFragments.at(-1)?.markdown || '';
+    const sourceClosingMarkdown = source.slice(sourceDescription.to);
+    const translatedClosingMarkdown = translated.slice(translatedDescription.to);
+    if (prefix.length < sourceDescription.from || prefix.length < translatedDescription.from
+        || !source.startsWith(prefix) || !translated.startsWith(prefix)
+        || sourceClosingMarkdown !== translatedClosingMarkdown
+        || !suffix.endsWith(sourceClosingMarkdown)) return null;
+    const sourceBody = trimmedRange(source, { from: prefix.length, to: sourceDescription.to });
+    const translatedBody = trimmedRange(translated, { from: prefix.length, to: translatedDescription.to });
+    return sourceBody && translatedBody ? { source: sourceBody, translated: translatedBody } : null;
+}
+
+function standaloneImageDescription(markdown) {
+    const root = MARKDOWN_PARSER.parse(markdown).topNode.firstChild;
+    const image = root?.firstChild;
+    return root?.name === 'Paragraph' && !root.nextSibling && image?.name === 'Image'
+        && image.from === 0 && image.to === markdown.length && image.getChild('URL')
+        ? imageDescriptionRange(image) : null;
+}
+
 function removeRepeatedComparisonImages(markdown, block, ranges) {
     let value = String(markdown || '');
     for (const fragment of block.protectedFragments || []) {
@@ -1342,15 +1404,15 @@ function removeRepeatedComparisonImages(markdown, block, ranges) {
     MARKDOWN_PARSER.parse(value).iterate({
         enter(node) {
             if (node.name !== 'Image') return undefined;
-            const altRange = markdownImageAltRange(node.node);
+            const altRange = imageDescriptionRange(node.node);
             if (altRange) {
-                imageEdits.push({
-                    from: node.from,
-                    to: node.to,
-                    text: unescapeImageCaptionMath(
-                        value.slice(altRange.from, altRange.to)
-                    ),
-                });
+                imageEdits.push(
+                    { from: node.from, to: altRange.from, text: '' },
+                    ...imageCaptionMathEdits(value.slice(altRange.from, altRange.to)).map(edit => ({
+                        ...offsetRange(edit, altRange.from), text: edit.text,
+                    })),
+                    { from: altRange.to, to: node.to, text: '' }
+                );
             }
             return false;
         },
@@ -1368,16 +1430,6 @@ function removeRepeatedComparisonImages(markdown, block, ranges) {
             return inner ? offsetRange(inner, -contentStart) : null;
         }),
     };
-}
-
-function markdownImageAltRange(image) {
-    const marks = [];
-    for (let child = image.firstChild; child; child = child.nextSibling) {
-        if (child.name === 'LinkMark') marks.push(child);
-    }
-    return marks.length >= 2 && marks[0].to <= marks[1].from
-        ? { from: marks[0].to, to: marks[1].from }
-        : null;
 }
 
 function parseTranslationResponse(response) {
