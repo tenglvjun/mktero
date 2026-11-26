@@ -2,12 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createZoteroTranslationAttachments, TRANSLATION_ATTACHMENT_SYNC_PREF } from '../src/platform/zotero-translation-attachments.js';
 
-test('stores and loads only the exact PDF translation in an opted-in personal library', async () => {
-    let optedIn = false;
+const identity = 'a'.repeat(64);
+const record = { version: 1, identity, targetLanguage: 'zh-CN', blocks: [{ markdown: '译文' }] };
+const newer = { ...record, blocks: [{ markdown: '新版译文' }] };
+const accept = (value, language) => value.identity === identity && value.targetLanguage === language && value;
+
+function createFixture() {
+    let optedIn = true;
     let fileSync = true;
     let downloads = 0;
     let creates = 0;
     let libraryType = 'user';
+    let failWrite = false;
+    let failSave = false;
+    let onWrite;
+    let writes = 0;
+    const syncState = {
+        SYNC_STATE_TO_DOWNLOAD: 1,
+        SYNC_STATE_IN_SYNC: 2,
+        SYNC_STATE_FORCE_UPLOAD: 3,
+        SYNC_STATE_FORCE_DOWNLOAD: 4,
+        SYNC_STATE_IN_CONFLICT: 5,
+    };
     const files = new Map();
     const attachments = [];
     const pdfs = new Map([11, 12].map(id => [id, {
@@ -23,7 +39,14 @@ test('stores and loads only the exact PDF translation in an opted-in personal li
     };
     const zotero = {
         Prefs: preferences,
-        Items: { getAsync: async id => pdfs.get(id) },
+        Items: {
+            getAsync: async id => pdfs.get(id),
+            async trashTx(ids) {
+                for (const item of attachments) {
+                    if (ids.includes(item.id)) item.deleted = true;
+                }
+            },
+        },
         Libraries: { get: () => ({ libraryType, editable: true, filesEditable: true }) },
         URI: { getItemURI: pdf => 'uri/' + pdf.key },
         Relations: {
@@ -35,6 +58,7 @@ test('stores and loads only the exact PDF translation in an opted-in personal li
             creates++;
             assert.equal(parentItemID, 10);
             const item = {
+                id: creates,
                 key: String(creates),
                 libraryID,
                 dateAdded: '2026-11-26',
@@ -42,47 +66,166 @@ test('stores and loads only the exact PDF translation in an opted-in personal li
                 attachmentContentType: contentType,
                 isStoredFileAttachment: () => true,
                 getField: () => title,
-                path: null,
+                path: 'stored/' + creates,
+                contents: files.get(file),
+                attachmentSyncState: syncState.SYNC_STATE_IN_SYNC,
                 getFilePathAsync: async () => item.path,
                 addRelation(predicate, uri) { Object.assign(item, { predicate, uri }); },
-                async saveTx() { attachments.push(item); },
+                async saveTx() {
+                    if (failSave) throw new Error('Could not save sync state');
+                    if (!attachments.includes(item)) attachments.push(item);
+                },
             };
+            files.set(item.path, item.contents);
             return item;
         } },
-        Sync: { Runner: { async downloadFile(item) {
-            downloads++;
-            item.path = item.attachmentFilename;
-        } } },
+        Sync: {
+            Storage: { Local: syncState },
+            Runner: { async downloadFile(item) {
+                downloads++;
+                item.path ||= 'stored/' + item.id;
+                files.set(item.path, item.contents);
+                item.attachmentSyncState = syncState.SYNC_STATE_IN_SYNC;
+            } },
+        },
     };
     const create = () => createZoteroTranslationAttachments({
         zotero,
         readFile: async filename => files.get(filename),
+        writeStoredFile: async (path, data) => {
+            if (failWrite) throw new Error('Could not replace file');
+            writes++;
+            files.set(path, data);
+            onWrite?.();
+        },
         writeTemporaryFile: async ({ name, data }) => {
             files.set(name, data);
             return { path: name, cleanup: async () => {} };
         },
     });
-    const sender = create();
-    const receiver = create();
-    const identity = 'a'.repeat(64);
-    const record = { version: 1, identity, targetLanguage: 'zh-CN', blocks: [{ markdown: '译文' }] };
-    const accept = (value, language) => value.targetLanguage === language && value;
+    return {
+        attachments, files, syncState, create,
+        get creates() { return creates; },
+        get downloads() { return downloads; },
+        get writes() { return writes; },
+        set optedIn(value) { optedIn = value; },
+        set fileSync(value) { fileSync = value; },
+        set libraryType(value) { libraryType = value; },
+        set failWrite(value) { failWrite = value; },
+        set failSave(value) { failSave = value; },
+        set onWrite(callback) { onWrite = callback; },
+    };
+}
+
+test('stores and loads only the exact PDF translation in an opted-in personal library', async () => {
+    const fixture = createFixture();
+    const sender = fixture.create();
+    const receiver = fixture.create();
+    fixture.optedIn = false;
     await sender.publish(11, identity, record);
-    assert.equal(creates, 0);
-    optedIn = true;
-    fileSync = false;
+    assert.equal(fixture.creates, 0);
+    fixture.optedIn = true;
+    fixture.fileSync = false;
     await sender.publish(11, identity, record);
-    assert.equal(creates, 0);
-    fileSync = true;
+    assert.equal(fixture.creates, 0);
+    fixture.fileSync = true;
     await Promise.all([sender.publish(11, identity, record), sender.publish(11, identity, record)]);
-    assert.equal(creates, 1);
+    assert.equal(fixture.creates, 1);
+    fixture.attachments[0].path = null;
     assert.deepEqual(await receiver.read(12, identity, accept), []);
     assert.deepEqual(await receiver.read(11, 'b'.repeat(64), accept), []);
-    assert.equal(downloads, 0);
+    assert.equal(fixture.downloads, 0);
     assert.deepEqual(await receiver.read(11, identity, accept), [record]);
-    assert.equal(downloads, 1);
-    libraryType = 'group';
+    assert.equal(fixture.downloads, 1);
+    fixture.libraryType = 'group';
     assert.deepEqual(await receiver.read(11, identity, accept), []);
-    optedIn = false;
+    fixture.optedIn = false;
     assert.deepEqual(await receiver.read(11, identity, accept), []);
+});
+
+test('retranslation updates the stored file under the same key and queues it for upload', async () => {
+    const fixture = createFixture();
+    const store = fixture.create();
+    const options = { replace: true, decode: accept };
+    await store.publish(11, identity, record);
+    const [item] = fixture.attachments;
+    const originalPath = item.path;
+    await store.publish(11, identity, newer);
+    assert.deepEqual(await store.read(11, identity, accept), [record]);
+    await store.publish(11, identity, newer, options);
+    assert.equal(fixture.creates, 1);
+    assert.equal(item.key, '1');
+    assert.equal(item.path, originalPath);
+    assert.equal(item.attachmentSyncState, 'to_upload');
+    assert.deepEqual(await store.read(11, identity, accept), [newer]);
+    await store.publish(11, identity, newer, options);
+    assert.equal(fixture.writes, 1);
+});
+
+test('loads a pending remote update even when the old file is present', async () => {
+    const fixture = createFixture();
+    const store = fixture.create();
+    await store.publish(11, identity, record);
+    const [item] = fixture.attachments;
+    item.contents = new TextEncoder().encode(JSON.stringify(newer));
+    item.attachmentSyncState = fixture.syncState.SYNC_STATE_TO_DOWNLOAD;
+    assert.deepEqual(await store.read(11, identity, accept), [newer]);
+    assert.equal(fixture.downloads, 1);
+
+    item.attachmentSyncState = fixture.syncState.SYNC_STATE_IN_CONFLICT;
+    assert.deepEqual(await store.read(11, identity, accept), [newer]);
+    await assert.rejects(store.publish(11, identity, record, { replace: true, decode: accept }), /sync conflict/);
+    assert.equal(fixture.downloads, 1);
+    assert.equal(fixture.writes, 0);
+});
+
+test('trashes only verified duplicates after a successful replacement and upload queue save', async () => {
+    const fixture = createFixture();
+    const store = fixture.create();
+    const options = { replace: true, decode: accept };
+    await store.publish(11, identity, record);
+    const [older] = fixture.attachments.splice(0);
+    await store.publish(11, identity, record);
+    const [unverified] = fixture.attachments.splice(0);
+    await store.publish(11, identity, record);
+    const [current] = fixture.attachments;
+    fixture.attachments.push(older, unverified);
+    fixture.files.set(unverified.path, new TextEncoder().encode('{}'));
+    await store.publish(11, identity, { ...record, targetLanguage: 'ja-JP' });
+    await store.publish(12, identity, record);
+    const unrelated = fixture.attachments.slice(3);
+
+    fixture.failWrite = true;
+    await assert.rejects(store.publish(11, identity, newer, options), /Could not replace file/);
+    assert.deepEqual(await store.read(11, identity, accept, { skipLanguages: ['ja-JP'] }), [record]);
+    assert.ok(!older.deleted);
+
+    fixture.failWrite = false;
+    fixture.failSave = true;
+    await assert.rejects(store.publish(11, identity, newer, options), /Could not save sync state/);
+    assert.deepEqual(await store.read(11, identity, accept, { skipLanguages: ['ja-JP'] }), [newer]);
+    assert.ok(!older.deleted);
+
+    fixture.failSave = false;
+    older.path = null;
+    await store.publish(11, identity, newer, options);
+    assert.equal(current.attachmentSyncState, 'to_upload');
+    assert.equal(current.key, '3');
+    assert.equal(fixture.writes, 1);
+    assert.equal(fixture.downloads, 1);
+    assert.ok(older.deleted);
+    assert.ok(!current.deleted && !unverified.deleted);
+    assert.ok(unrelated.every(item => !item.deleted));
+});
+
+test('preserves a native sync conflict that appears while writing the attachment', async () => {
+    const fixture = createFixture();
+    const store = fixture.create();
+    await store.publish(11, identity, record);
+    const [item] = fixture.attachments;
+    fixture.onWrite = () => { item.attachmentSyncState = fixture.syncState.SYNC_STATE_IN_CONFLICT; };
+    await assert.rejects(store.publish(11, identity, newer, { replace: true, decode: accept }),
+        /changed during publication/);
+    assert.equal(item.attachmentSyncState, fixture.syncState.SYNC_STATE_IN_CONFLICT);
+    assert.equal(fixture.creates, 1);
 });

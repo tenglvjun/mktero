@@ -103,11 +103,11 @@ Mktero groups the article into bounded Markdown batches, protects formulas, cita
 
 ### Sync completed translations
 
-In Mktero settings, under **General**, turn on **Sync completed translations with Zotero** on both computers. This is off by default and requires Zotero file sync in your personal library. Finish a full-document translation or reopen a paper with a matching saved translation on the first computer. Zotero syncs the separate `Mktero Translation` attachment.
+In Mktero settings, under **General**, turn on **Sync completed translations with Zotero** on both computers. This is off by default and requires Zotero file sync in your personal library. Finish a full-document translation or reopen a paper with a matching saved translation on the first computer. Zotero syncs the separate `Mktero Translation` attachment. A completed retranslation updates the existing attachment for that source and language. After the update, Mktero moves any verified duplicate copies to the Zotero Trash.
 
-On the second computer, open the same Zotero PDF in Mktero. Once the original Markdown is ready, a matching synced translation becomes available under **Translation**. You can check the original sentences without configuring an AI provider on that computer. If Zotero has not synced the attachment item yet, sync your library and reopen the PDF.
+After Zotero syncs the update, reopen the same Zotero PDF in Mktero on the second computer. The matching synced translation takes priority over the local cache under **Translation**. If the attachment is unavailable, Mktero can still show a matching local translation. You can check the original sentences without configuring an AI provider on that computer.
 
-The setting pauses Mktero's translation attachment reads and writes on this computer. Existing attachments remain under Zotero's file sync settings. To remove a synced copy, pause the feature on the devices using it and delete that translation attachment in Zotero. The local translation cache is separate.
+Turning off this setting pauses Mktero's translation attachment reads and writes on this computer. Zotero still manages existing attachments. Turning it back on gives priority to an available matching attachment. Reopening can fill a missing attachment from the local cache. To remove a synced copy, pause the feature on the devices using it and delete that translation attachment in Zotero.
 
 ### Translate a selection
 
