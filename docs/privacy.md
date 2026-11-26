@@ -107,7 +107,7 @@ Full-document translation (v8) sends instructions and batches of protected Markd
 
 Selecting **translated text** to see its source, showing the whole original block, or jumping to an offscreen original makes no network request. Mktero saves the sentence or sentence-group mappings with the translation, unencrypted in your Zotero profile, so they work after reopening. The IDs, hashes, and text ranges used for alignment are not included in Markdown, clipboard content, snapshots, or Obsidian exports.
 
-When you enable translation attachment sync, the copy contains only the translated blocks and the information needed to match them to the source on your other computer. The receiving reader obtains original Markdown through its normal conversion or cache flow. Disabling the option pauses Mktero on this device. Zotero keeps managing existing copies.
+When you enable translation attachment sync, the copy contains only the translated blocks and the information needed to match them to the source on your other computer. The receiving reader obtains original Markdown through its normal conversion or cache flow. With the option off, Mktero reads matching files already on this device. Writes and downloads initiated by Mktero require the option to be on. Zotero keeps managing existing copies.
 
 Translating a selection of **original text** is a separate AI request: the only paper content sent is the selected text. The result is not written to the full-document translation cache.
 

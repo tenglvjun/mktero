@@ -3438,7 +3438,7 @@ async function translateDocument(documentID, {
             logMkteroError(new Error('Zotero translation attachment could not be updated'));
             if (runtime.presenter?.get(documentID) !== presentation
                 || presentation.translationLanguageSelection !== translationRequest
-                || !runtime.translationAttachments?.enabled()
+                || !runtime.translationAttachments?.syncEnabled()
                 || presentation.model.markdown !== result.sourceMarkdown) return;
             runtime.presenter.update(presentation, {
                 translationError: runtimeTranslate('ai.translationAttachmentUpdateFailed'),
@@ -3882,7 +3882,7 @@ async function prepareDocumentTranslationAttachment(model) {
 
 async function publishDocumentTranslation(itemID, model, variants, { replace = false, signal } = {}) {
     const attachments = runtime.translationAttachments;
-    if (!itemID || !attachments?.enabled() || signal?.aborted
+    if (!itemID || !attachments?.syncEnabled() || signal?.aborted
         || !variants.some(variant => !variant.partial)) return;
     const format = await prepareDocumentTranslationAttachment(model);
     if (!format || signal?.aborted) return;
@@ -3897,7 +3897,7 @@ async function publishDocumentTranslation(itemID, model, variants, { replace = f
 
 async function readSyncedDocumentTranslations(itemID, model, options) {
     const attachments = runtime.translationAttachments;
-    if (!itemID || !attachments?.enabled()) return [];
+    if (!itemID || !attachments || options?.signal?.aborted) return [];
     const format = await prepareDocumentTranslationAttachment(model);
     return format ? attachments.read(itemID, format.identity, format.decode, options) : [];
 }
@@ -3912,8 +3912,7 @@ async function loadSyncedDocumentTranslations(presentation, itemID, signal) {
     const current = presentation.model;
     if (!variants.length || presentation.translationAttachmentRead !== read
         || presentation.closed || signal?.aborted
-        || current.cacheKey !== cacheKey || current.markdown !== markdown
-        || !runtime.translationAttachments?.enabled()) return;
+        || current.cacheKey !== cacheKey || current.markdown !== markdown) return;
     const complete = new Set(current.translationCachedLanguages || []);
     for (const variant of variants) complete.add(variant.targetLanguage);
     const visible = current.translationTargetLanguage
@@ -3966,17 +3965,13 @@ async function selectTranslationLanguage(documentID, targetLanguage) {
     const currentComplete = hasCurrentTranslationProfile(presentation.model)
         && presentation.model.translationStatus === 'ready'
         && presentation.model.translationTargetLanguage === targetLanguage;
-    const syncEnabled = runtime.translationAttachments?.enabled();
     if (currentComplete) {
         return setTranslationView(documentID, 'translated');
     }
     const selection = {};
     presentation.translationLanguageSelection = selection;
     const { cacheKey, markdown } = presentation.model;
-    if (syncEnabled || presentation.model.translationCachedLanguages?.includes(targetLanguage)) {
-        const activated = await activateCachedTranslationLanguage(presentation, targetLanguage, selection);
-        if (activated) return true;
-    }
+    if (await activateCachedTranslationLanguage(presentation, targetLanguage, selection)) return true;
     if (runtime.presenter?.get(documentID) !== presentation
         || presentation.translationLanguageSelection !== selection
         || presentation.model.cacheKey !== cacheKey || presentation.model.markdown !== markdown
@@ -3994,20 +3989,14 @@ async function activateCachedTranslationLanguage(presentation, targetLanguage, s
     const documentKey = String(presentation.model.cacheKey || '');
     const markdown = String(presentation.model.markdown || '');
     const itemID = presentation.model.sourceItemID ?? presentation.model.itemID ?? documentID;
-    let cached;
-    if (runtime.translationAttachments?.enabled()) {
-        await presentation.translationAttachmentPublications?.get(targetLanguage)?.catch(() => {});
-        if (presentation.translationLanguageSelection !== selection || presentation.closed
-            || String(presentation.model.cacheKey || '') !== documentKey
-            || String(presentation.model.markdown || '') !== markdown) return false;
-        const synced = await readSyncedDocumentTranslations(itemID, presentation.model, {
-            skipLanguages: AI_TARGET_LANGUAGES.filter(language => language !== targetLanguage),
-        }).catch(() => []);
-        if (runtime.translationAttachments?.enabled()) {
-            cached = synced.find(variant => variant.targetLanguage === targetLanguage);
-        }
-    }
-    cached ||= await runtime.translationService?.getCachedDocumentTranslation?.({
+    await presentation.translationAttachmentPublications?.get(targetLanguage)?.catch(() => {});
+    if (presentation.translationLanguageSelection !== selection || presentation.closed
+        || String(presentation.model.cacheKey || '') !== documentKey
+        || String(presentation.model.markdown || '') !== markdown) return false;
+    const [synced] = await readSyncedDocumentTranslations(itemID, presentation.model, {
+        skipLanguages: AI_TARGET_LANGUAGES.filter(language => language !== targetLanguage),
+    }).catch(() => []);
+    const cached = synced || await runtime.translationService?.getCachedDocumentTranslation?.({
         documentKey,
         markdown,
         targetLanguage,

@@ -12,16 +12,16 @@ export function createZoteroTranslationAttachments({
     const downloads = new Map();
     const pendingUploads = new Set();
     let disposed = false;
-    const enabled = () => !disposed && zotero.Prefs?.get?.(TRANSLATION_ATTACHMENT_SYNC_PREF, true) === true
+    const syncEnabled = () => !disposed && zotero.Prefs?.get?.(TRANSLATION_ATTACHMENT_SYNC_PREF, true) === true
         && zotero.Prefs?.get?.('sync.storage.enabled') === true;
 
     async function scope(itemID) {
-        if (!itemID || !enabled()) return null;
+        if (!itemID || disposed) return null;
         const pdf = await zotero.Items.getAsync(itemID);
         if (!pdf?.isPDFAttachment?.() || pdf.deleted
-            || zotero.Libraries.get(pdf.libraryID)?.libraryType !== 'user') return null;
-        const predicate = zotero.Relations.relatedItemPredicate;
-        const uri = zotero.URI.getItemURI(pdf);
+            || zotero.Libraries?.get?.(pdf.libraryID)?.libraryType !== 'user') return null;
+        const predicate = zotero.Relations?.relatedItemPredicate;
+        const uri = zotero.URI?.getItemURI?.(pdf);
         return predicate && uri ? { pdf, predicate, uri } : null;
     }
 
@@ -42,7 +42,7 @@ export function createZoteroTranslationAttachments({
 
     function canWrite(libraryID) {
         const library = zotero.Libraries.get(libraryID);
-        return enabled() && library?.editable && library.filesEditable;
+        return syncEnabled() && library?.editable && library.filesEditable;
     }
 
     function hasSyncState(item, name) {
@@ -62,7 +62,7 @@ export function createZoteroTranslationAttachments({
     async function readCopy(item, language, decode, active) {
         if (!active() || item.deleted) return null;
         let path = await item.getFilePathAsync();
-        if ((!path || awaitingDownload(item)) && active() && !item.deleted
+        if (syncEnabled() && (!path || awaitingDownload(item)) && active() && !item.deleted
             && !awaitingConflictResolution(item) && !hasSyncState(item, 'to_upload')
             && !pendingUploads.has(item.id)) {
             let request = downloads.get(item.id);
@@ -78,9 +78,10 @@ export function createZoteroTranslationAttachments({
             }
             path = await item.getFilePathAsync();
         }
-        if (!path || !active() || item.deleted || awaitingDownload(item)) return null;
+        if (!path || !active() || item.deleted || (syncEnabled() && awaitingDownload(item))) return null;
         const bytes = await readFile(path, MAX_BYTES + 1);
-        if (bytes.length > MAX_BYTES || !active() || item.deleted || awaitingDownload(item)) return null;
+        if (bytes.length > MAX_BYTES || !active() || item.deleted
+            || (syncEnabled() && awaitingDownload(item))) return null;
         const serialized = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
         const result = decode(JSON.parse(serialized), language);
         return result ? { path, serialized, result } : null;
@@ -134,12 +135,13 @@ export function createZoteroTranslationAttachments({
     }
 
     return {
-        enabled,
+        syncEnabled,
         dispose() { disposed = true; },
         async read(itemID, identity, accept, { skipLanguages = [], signal } = {}) {
             const attachmentScope = await scope(itemID);
             if (!attachmentScope || signal?.aborted) return [];
-            const active = () => enabled() && !signal?.aborted && !attachmentScope.pdf.deleted;
+            const active = () => !disposed && !signal?.aborted && !attachmentScope.pdf.deleted;
+            if (!active()) return [];
             const languages = new Set(AI_TARGET_LANGUAGES.filter(language => !skipLanguages.includes(language)));
             const results = [];
             for (const { item, language } of await candidates(attachmentScope, identity, [...languages])) {
@@ -156,6 +158,7 @@ export function createZoteroTranslationAttachments({
             return active() ? results : [];
         },
         async publish(itemID, identity, record, { replace = false, decode, signal } = {}) {
+            if (!syncEnabled() || signal?.aborted) return;
             const attachmentScope = await scope(itemID);
             if (!attachmentScope) return;
             const { pdf, predicate, uri } = attachmentScope;

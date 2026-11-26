@@ -1279,38 +1279,42 @@ test('uses the language menu without changing the default translation language',
         }
     );
 
-    await t.test('prefers a received translation over the older complete local translation', async () => {
+    await t.test('prefers downloaded translation attachments even with translation sync off', async () => {
         const cachedBefore = await cache.getTranslationByLanguage(cacheKey, 'zh-CN');
         const service = new MarkdownTranslationService({
             getSettings: () => getAISettings(globalThis.Zotero),
             aiGateway: {
                 generateText: async ({ messages }) => ({
-                    text: headingTranslationReply('同步新版论文')({ messages }),
+                    text: headingTranslationReply(
+                        messages[0].content.includes('Japanese') ? '同期済みの論文' : '同步新版论文'
+                    )({ messages }),
                 }),
             },
         });
-        const fresh = await service.translateDocument({
-            documentKey: cacheKey, markdown, targetLanguage: 'zh-CN',
-        });
         const format = await service.prepareTranslationAttachment({ documentKey: cacheKey, markdown });
-        const attachmentPath = path.join(profilePath, 'translation.json');
-        await writeFile(attachmentPath, JSON.stringify(format.encode(fresh)));
+        const attachments = [];
+        for (const [index, targetLanguage] of ['zh-CN', 'ja-JP'].entries()) {
+            const fresh = await service.translateDocument({ documentKey: cacheKey, markdown, targetLanguage });
+            const attachmentPath = path.join(profilePath, targetLanguage + '.json');
+            await writeFile(attachmentPath, JSON.stringify(format.encode(fresh)));
+            attachments.push({
+                id: 99 + index, key: 'TRANSKEY' + index, dateAdded: '2026-11-26', libraryID: 1,
+                attachmentFilename: 'mktero-translation-PDFKEY42-' + format.identity + '-' + targetLanguage + '.json',
+                attachmentContentType: 'application/json',
+                isStoredFileAttachment: () => true,
+                getField: () => 'Mktero Translation · ' + targetLanguage,
+                getFilePathAsync: async () => attachmentPath,
+            });
+        }
         Object.assign(globalThis.Zotero, {
             Libraries: { get: () => ({ libraryType: 'user' }) },
             URI: { getItemURI: item => 'pdf/' + item.key },
             Relations: {
                 relatedItemPredicate: 'dc:relation',
-                getByPredicateAndObject: async (_type, _predicate, uri) => uri === 'pdf/PDFKEY42' ? [{
-                    id: 99, key: 'TRANSKEY', dateAdded: '2026-11-26', libraryID: 1,
-                    attachmentFilename: 'mktero-translation-PDFKEY42-' + format.identity + '-zh-CN.json',
-                    attachmentContentType: 'application/json',
-                    isStoredFileAttachment: () => true,
-                    getField: () => 'Mktero Translation · zh-CN',
-                    getFilePathAsync: async () => attachmentPath,
-                }] : [],
+                getByPredicateAndObject: async (_type, _predicate, uri) => uri === 'pdf/PDFKEY42' ? attachments : [],
             },
         });
-        preferences.set('extensions.mktero.translationAttachmentSync', true);
+        preferences.set('extensions.mktero.translationAttachmentSync', false);
         preferences.set('sync.storage.enabled', true);
 
         mainWindow.Zotero_Tabs.close('tab-3');
@@ -1322,10 +1326,13 @@ test('uses the language menu without changing the default translation language',
         syncedMode.click();
         syncedShadow.querySelector('[data-translation-language="zh-CN"]').click();
         await waitFor(() => syncedShadow.querySelector('.cm-content').textContent.includes('同步新版论文'));
+        syncedMode.click();
+        syncedShadow.querySelector('[data-translation-language="ja-JP"]').click();
+        await waitFor(() => syncedShadow.querySelector('.cm-content').textContent.includes('同期済みの論文'));
         assert.equal(providerRequests.length, 7);
         assert.deepEqual(await cache.getTranslationByLanguage(cacheKey, 'zh-CN'), cachedBefore);
 
-        preferences.set('extensions.mktero.translationAttachmentSync', false);
+        await rm(path.join(profilePath, 'zh-CN.json'));
         mainWindow.Zotero_Tabs.close('tab-4');
         toolbarButtons[0].click();
         const localShadow = (await waitFor(() => mainWindow.tabRoot('tab-5'))).shadowRoot;
