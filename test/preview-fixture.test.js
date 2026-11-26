@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isValidSourceMapEntry } from '../src/core/markdown-source-map.js';
+import { projectSourceAnnotation } from '../src/editor/translation-presentation.js';
 import {
     createPaperAnnotationOverlay,
     createPaperSourceMap,
@@ -81,6 +82,30 @@ test('matches every sample annotation to the Markdown and a page', () => {
         assert.equal(PAPER_MARKDOWN.slice(range.from, range.to), annotation.text);
         assert.ok(Number.isInteger(annotation.pageIndex));
     }
+});
+
+test('locates each sample annotation in its corresponding translated sentence', () => {
+    const { sourceMap } = layout();
+    const overlay = createPaperAnnotationOverlay(PAPER_MARKDOWN, PAPER_ANNOTATIONS, sourceMap);
+    const { views } = createPaperTranslation(PAPER_MARKDOWN, PAPER_TRANSLATIONS_ZH_CN);
+    const expected = new Map([
+        ['PREVIEW1', '我们把阅读顺序看作版面块之间的成对排序问题，并在分栏约束下解码这个排序。'],
+        ['PREVIEW2', '在 1,240 个标注页面上，该方法的 Kendall $\\tau$ 达到 0.947，段落顺序错误比几何基线相对减少 38%，在笔记本 CPU 上每页只多花约 12 ms。'],
+        ['PREVIEW3', '它们快且可预测，但当一张图横跨两栏，或者图注放在图旁边而不是下方时就会出错。'],
+        ['PREVIEW4', '它在混合三栏以上且带不规则插图的页面上仍然吃力，而且它的判断取决于上游块检测器的质量。'],
+    ]);
+    const located = new Map(overlay.matched.map(annotation => {
+        const { ranges, fallback } = projectSourceAnnotation(annotation.ranges, {
+            sourceMarkdown: PAPER_MARKDOWN,
+            translatedMarkdown: views.translatedMarkdown,
+            blockRanges: views.blockRanges,
+        });
+        assert.equal(fallback, 'sentence', annotation.id);
+        assert.equal(ranges.length, 1, annotation.id);
+        const [{ from, to }] = ranges;
+        return [annotation.id, views.translatedMarkdown.slice(from, to)];
+    }));
+    assert.deepEqual(located, expected);
 });
 
 test('turns inline LaTeX into readable page text', () => {

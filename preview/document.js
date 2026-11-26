@@ -7,6 +7,7 @@ import {
     createDocumentTranslationViews,
     validateTranslatedBlock,
 } from '../src/markdown/markdown-translation-blocks.js';
+import { assembleAlignedBlock, createAlignmentPlan } from '../src/markdown/translation-alignment.js';
 
 export const PAGE_WIDTH = 612;
 export const PAGE_HEIGHT = 792;
@@ -343,38 +344,55 @@ export function normalizedBBox(item) {
     ];
 }
 
-// Pair the hand-written translations with the reader's translatable blocks.
-// Keys are the English block text a translation starts with. A block without a
-// key keeps its own text (author names, for example); a translation that
-// fails the reader's own validation is reported and the block falls back too.
-export function createPaperTranslation(markdown, translationsByPrefix) {
+// Sentence translations require the original block text so that preview
+// corrections cannot attach old sentence pairs to a changed block.
+export function createPaperTranslation(markdown, paperTranslations) {
+    const targetLanguage = 'zh-CN';
     const blocks = collectMarkdownTranslationBlocks(markdown);
+    const entries = [...paperTranslations];
     const translations = [];
     const missing = [];
     const invalid = [];
     for (const block of blocks) {
         if (!block.translatable) continue;
-        const entry = [...translationsByPrefix].find(([prefix]) => (
-            block.markdown.startsWith(prefix)
+        const entry = entries.find(([source, translated]) => (
+            Array.isArray(translated) ? block.markdown === source : block.markdown.startsWith(source)
         ));
-        let requestMarkdown = block.requestMarkdown;
         if (entry) {
             try {
-                requestMarkdown = toPlaceholderMarkdown(block, entry[1]);
-                validateTranslatedBlock(block, requestMarkdown);
+                const [, translated] = entry;
+                const translation = Array.isArray(translated)
+                    ? alignPaperBlock(block, translated, targetLanguage)
+                    : { id: block.id, markdown: toPlaceholderMarkdown(block, translated) };
+                validateTranslatedBlock(block, translation.markdown);
+                translations.push(translation);
+                continue;
             }
             catch (error) {
                 invalid.push({ id: block.id, message: error.message });
-                requestMarkdown = block.requestMarkdown;
             }
         }
         else if (!isIdentityBlock(block)) {
             missing.push(block.id);
         }
-        translations.push({ id: block.id, markdown: requestMarkdown });
+        translations.push({ id: block.id, markdown: block.requestMarkdown });
     }
-    const views = createDocumentTranslationViews(markdown, blocks, translations);
+    const views = createDocumentTranslationViews(markdown, blocks, translations, { targetLanguage });
     return { blocks, translations, views, missing, invalid };
+}
+
+function alignPaperBlock(block, sentences, targetLanguage) {
+    const plan = createAlignmentPlan(block);
+    if (plan?.units.length !== sentences.length) {
+        throw new Error('The fixture translation must cover each planned sentence');
+    }
+    const units = plan.units.map(({ id, sourceMarkdown }, index) => {
+        const protectedFragments = block.protectedFragments.filter(({ placeholder }) =>
+            sourceMarkdown.includes(placeholder)
+        );
+        return { id, translatedMarkdown: toPlaceholderMarkdown({ protectedFragments }, sentences[index]) };
+    });
+    return assembleAlignedBlock(block, units, targetLanguage);
 }
 
 // Byline-style blocks are left in the source language on purpose.
