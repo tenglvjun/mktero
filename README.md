@@ -102,6 +102,7 @@ The [workflow index](./docs/workflows.md) links to each task.
   bytes or conversion-quota use. The service stores an account-linked PDF
   identity and parser route. A changed model can require another conversion
   and PDF upload; a retained matching result can be reused.
+  Hosted result ZIPs expire after a configurable idle period of 14 days by default.
 - Choosing MinerU cloud, a local MinerU service, or Mistral sends the complete PDF
   there instead, and not to Mktero. A direct MinerU cloud request also names the
   parsing model fixed when that operation started.

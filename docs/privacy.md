@@ -23,7 +23,7 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 
 | Data | Sent to or stored in | Zotero sync |
 | --- | --- | --- |
-| PDF SHA-256, byte size, and content type before reusing a hosted cache; the complete PDF when a conversion runs | The Mktero service for the signed-in account; the service stores an account-linked PDF identity and parser route | Not by Mktero |
+| PDF SHA-256, byte size, and content type before reusing a hosted cache, and the complete PDF when a conversion runs | The Mktero service for the signed-in account stores an account-linked PDF identity and parser route. It records when it last reused each hosted result or issued its download link and deletes idle ZIPs after a configurable period of 14 days by default. | Not by Mktero |
 | Complete PDF on a cache miss, after you switch to your own converter | Selected MinerU cloud, the configured local MinerU service, or Mistral; a direct MinerU cloud request also names the parsing model fixed when that operation started | Not by Mktero |
 | Email and password when signing in or registering, and the registration verification code | The Mktero service you select; the password and code are not saved | Not by Mktero |
 | Your account profile, conversion-activity counts and daily quota balance when supported, requested with the access token while the account pane is open; quota also refreshes after hosted requests settle or when you manually resume | The Mktero service you select | Not by Mktero |
