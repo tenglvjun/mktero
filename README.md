@@ -115,6 +115,7 @@ The [workflow index](./docs/workflows.md) links to each task.
   corrections, translations and their sentence mappings, reading positions, local highlights not yet in the
   PDF, and cross-page highlight annotation keys stay unencrypted in the Zotero
   profile. Mktero does not sync them.
+- In a personal library, you can opt in to syncing completed full-document translations as separate attachments through Zotero file sync. See [Sync completed translations](./docs/reading.md#sync-completed-translations).
 - The research-note preference stores only the library ID and note key in the
   local Zotero profile, unencrypted. Mktero neither sends nor syncs this
   preference. The note remains an ordinary Zotero note, saved and synced by

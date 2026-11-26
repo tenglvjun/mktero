@@ -10,6 +10,7 @@ This page lists what Mktero sends, where it keeps data, and what local cleanup r
 - Before reusing a hosted cache, Mktero sends the PDF SHA-256, byte size, and content type to confirm the applicable parser profile. This lookup sends no PDF bytes and uses no conversion allowance.
 - Local llm-for-zotero imports leave the source unchanged. Import and reopening upload neither the PDF nor the result.
 - Credentials, tokens, caches, corrections, translations, reading positions, local highlights, and the research-note target preference are unencrypted in the active Zotero profile. Mktero does not sync them.
+- Opt-in translation sync creates a separate stored attachment in your personal Zotero library for each completed translation. Zotero handles file sync.
 - PDF annotations, Zotero notes, and snapshots sync according to Zotero settings. Mktero does not send notes anywhere.
 - Reference, citation, and translation requests are bounded and local-first. Logs exclude API tokens, presigned URLs, PDF bytes, and authenticated responses.
 - Problem reports stay on this computer. Copying or saving creates a redacted file; this version does not upload it.
@@ -61,6 +62,7 @@ The complete data inventory is grouped below by destination: [services](#sent-to
 | Data | Sent to or stored in | Zotero sync |
 | --- | --- | --- |
 | Zotero PDF annotations | Local Zotero library | According to Zotero settings |
+| Optional completed translation copy: translated blocks, sentence or sentence-group identifiers, target language, format version and matching hash | A separate unencrypted stored attachment in your personal Zotero library | Through Zotero file sync if enabled |
 | Zotero notes written in the Notes column, including research notes and passages added with `Add to Note` or `Add Note from Annotations` | Zotero note items in the local Zotero library; Mktero keeps no separate note copy | According to Zotero settings |
 | Saved snapshot Note and attachments, including optional figure metadata and OCR fragments | Zotero items and attachments | According to Zotero settings |
 | Imported reference metadata and PDF attachments | Active Zotero profile, unencrypted | According to Zotero settings |
@@ -104,6 +106,8 @@ Reference import requests are local-first:
 Full-document translation (v8) sends instructions and batches of protected Markdown to your configured AI provider. Block IDs and IDs for locally determined sentences or conservative sentence groups let the provider return each translation with its source ID. Mktero builds the mapping used for reading locally, rather than asking the provider for character positions. If Markdown validation fails, a retry may send ordinary text segments from the affected block to the same provider. When translation rules change, the reader waits for you to request full-document translation again. Your configured provider receives those batches and may charge for the request.
 
 Selecting **translated text** to see its source, showing the whole original block, or jumping to an offscreen original makes no network request. Mktero saves the sentence or sentence-group mappings with the translation, unencrypted in your Zotero profile, so they work after reopening. The IDs, hashes, and text ranges used for alignment are not included in Markdown, clipboard content, snapshots, or Obsidian exports.
+
+When you enable translation attachment sync, the copy contains only the translated blocks and the information needed to match them to the source on your other computer. The receiving reader obtains original Markdown through its normal conversion or cache flow. Disabling the option pauses Mktero on this device. Zotero keeps managing existing copies.
 
 Translating a selection of **original text** is a separate AI request: the only paper content sent is the selected text. The result is not written to the full-document translation cache.
 

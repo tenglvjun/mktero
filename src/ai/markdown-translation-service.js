@@ -140,6 +140,71 @@ export class MarkdownTranslationService {
         return cached.filter(Boolean);
     }
 
+    async prepareTranslationAttachment({ documentKey, markdown, chromeRanges, figureMap }) {
+        if (!CACHE_KEY_PATTERN.test(documentKey || '') || !markdown?.trim()) return null;
+        const identity = await this.createCacheKey(JSON.stringify([
+            TRANSLATION_PROFILE_ID, TRANSLATION_PROMPT_VERSION, documentKey, markdown,
+        ]));
+        const blocks = collectSourceTranslationBlocks(markdown, chromeRanges);
+        const translatable = blocks.filter(block => block.translatable);
+        if (!translatable.length || translatable.length > MAX_DOCUMENT_TRANSLATION_BLOCKS) return null;
+
+        return {
+            identity,
+            encode(translation) {
+                if (!translation || translation.partial
+                    || translation.sourceMarkdown !== markdown
+                    || translation.translationProfile !== TRANSLATION_PROFILE_ID
+                    || !isSupportedAITargetLanguage(translation.targetLanguage)
+                    || translation.blocks?.length !== translatable.length) return null;
+                const entries = translation.blocks.map((entry, index) => {
+                    const block = translatable[index];
+                    if (entry.id !== block.id) return null;
+                    const aligned = verifyAlignedBlock(block, entry, translation.targetLanguage);
+                    if (!aligned) return { markdown: entry.markdown };
+                    return {
+                        units: aligned.units.map(({ id, translatedMarkdown }) => ({ id, translatedMarkdown })),
+                    };
+                });
+                if (entries.includes(null)) return null;
+                return { version: 1, identity, targetLanguage: translation.targetLanguage, blocks: entries };
+            },
+            decode(record, language) {
+                if (record?.version !== 1 || record.identity !== identity
+                    || record.targetLanguage !== language || !isSupportedAITargetLanguage(language)
+                    || !Array.isArray(record.blocks) || record.blocks.length !== translatable.length) return null;
+                try {
+                    const translations = translatable.map((block, index) => {
+                        const entry = record.blocks[index];
+                        if (Array.isArray(entry?.units)) {
+                            return assembleAlignedBlock(block, entry.units, language);
+                        }
+                        if (typeof entry?.markdown !== 'string' || !entry.markdown.trim()) {
+                            throw new Error('Missing translation block');
+                        }
+                        return { id: block.id, markdown: entry.markdown };
+                    });
+                    validateDocumentTranslationOutput(translatable, translations);
+                    return {
+                        ...buildDocumentTranslationViews(markdown, blocks, translations, figureMap, language),
+                        blocks: translations,
+                        sourceBlocks: createTranslationSourceBlocks(translatable),
+                        sourceMarkdown: markdown,
+                        documentKey,
+                        translationKey: identity,
+                        translationProfile: TRANSLATION_PROFILE_ID,
+                        targetLanguage: language,
+                        partial: false,
+                        failedBlocks: [],
+                        totalBlocks: translatable.length,
+                        completedBlocks: translatable.length,
+                    };
+                }
+                catch { return null; }
+            },
+        };
+    }
+
     async reconcileDocumentTranslation({
         documentKey,
         markdown,

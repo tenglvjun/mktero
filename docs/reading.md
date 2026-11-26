@@ -101,6 +101,14 @@ Once a complete translation exists, the `Translation` tab opens the language men
 
 Mktero groups the article into bounded Markdown batches, protects formulas, citations, links, code, images, and structural placeholders, and runs at most five requests concurrently. A reference list is left untranslated from its heading until the next heading of the same or a higher level, so back matter a journal sets after the references, such as Acknowledgements, Author contributions, or Data availability, is still translated. Cache and correction rules are in [translation details](#translate-with-ai-1).
 
+### Sync completed translations
+
+In Mktero settings, under **General**, turn on **Sync completed translations with Zotero** on both computers. This is off by default and requires Zotero file sync in your personal library. Finish a full-document translation or reopen a paper with a matching saved translation on the first computer. Zotero syncs the separate `Mktero Translation` attachment.
+
+On the second computer, open the same Zotero PDF in Mktero. Once the original Markdown is ready, a matching synced translation becomes available under **Translation**. You can check the original sentences without configuring an AI provider on that computer. If Zotero has not synced the attachment item yet, sync your library and reopen the PDF.
+
+The setting pauses Mktero's translation attachment reads and writes on this computer. Existing attachments remain under Zotero's file sync settings. To remove a synced copy, pause the feature on the devices using it and delete that translation attachment in Zotero. The local translation cache is separate.
+
 ### Translate a selection
 
 1. Select a term or passage in `Original`, or on the source side of `Bilingual`.

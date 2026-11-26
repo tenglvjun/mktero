@@ -25,6 +25,45 @@ const SETTINGS = Object.freeze({
     maxOutputTokens: 2_048,
 });
 
+test('a translation attachment restores sentence alignment from the local original without an AI provider', async () => {
+    const source = 'The trial enrolled ten people. The treatment lasted two weeks.';
+    const options = { documentKey: 'a'.repeat(64), markdown: source };
+    const writer = new MarkdownTranslationService({
+        aiGateway: { async generateText(request) {
+            return { text: translateBatchRequest(request.messages[1].content, value => value
+                .replace('The trial enrolled ten people.', '试验招募了十人。')
+                .replace('The treatment lasted two weeks.', '治疗持续了两周。')) };
+        } },
+        getSettings: () => SETTINGS,
+    });
+    const translation = await writer.translateDocument(options);
+    assert.equal(translation.partial, false);
+    assert.equal(translation.blocks[0].alignment.units.length, 2);
+    const format = await writer.prepareTranslationAttachment(options);
+    const record = JSON.parse(JSON.stringify(format.encode(translation)));
+    const encoded = JSON.stringify(record);
+    for (const privateValue of [source, 'The trial enrolled', SETTINGS.apiBase, 'sourceRanges', 'sourceBlocks']) {
+        assert.ok(!encoded.includes(privateValue));
+    }
+    const reader = new MarkdownTranslationService({
+        aiGateway: { generateText: assert.fail },
+        getSettings: () => ({ ...SETTINGS, apiKey: '' }),
+    });
+    const target = await reader.prepareTranslationAttachment(options);
+    const restored = target.decode(record, 'zh-CN');
+    assert.equal(restored.translatedMarkdown, translation.translatedMarkdown);
+    assert.equal(restored.comparisonMarkdown, translation.comparisonMarkdown);
+    assert.deepEqual(restored.blocks, translation.blocks);
+    assert.equal(format.encode({ ...translation, partial: true }), null);
+    assert.equal(target.decode(record, 'ja-JP'), null);
+    const differentPDF = await reader.prepareTranslationAttachment({ ...options, documentKey: 'b'.repeat(64) });
+    assert.equal(differentPDF.decode(record, 'zh-CN'), null);
+    const differentOriginal = await reader.prepareTranslationAttachment({ ...options, markdown: source + ' Another sentence.' });
+    assert.equal(differentOriginal.decode(record, 'zh-CN'), null);
+    record.blocks[0].units.pop();
+    assert.equal(target.decode(record, 'zh-CN'), null);
+});
+
 test('retains Figure identity across translation, cache variants and corrected source reconciliation', async () => {
     const document = await makeRestoredFigureDocument();
     const cache = new Map();
