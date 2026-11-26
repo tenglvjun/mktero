@@ -237,6 +237,32 @@ async function runSandboxedEmbed(browser, external, pageErrors) {
                 return error.name;
             }
         });
+        // The diagnostics report overlays the sidebar. Dismiss it before
+        // exercising the same pointer interactions as the public preview.
+        await frame.locator('.preview-diagnostics').evaluate(panel => { panel.hidden = true; });
+        const clickOptions = { timeout: 3000 };
+        await frame.getByRole('tab', { name: 'Annotations', exact: true }).click(clickOptions);
+        await frame.getByRole('radio', { name: 'Translation: Simplified Chinese', exact: true }).click(clickOptions);
+        await frame.getByRole('menuitemradio', { name: 'Simplified Chinese', exact: true }).click(clickOptions);
+        const links = frame.locator('.markdown-note-link');
+        const annotatedSentences = await links.evaluateAll(nodes => nodes.filter(node => (
+            !node.disabled && node.querySelector('.markdown-note-projection')
+        )).length);
+        if (await links.count() !== 4 || annotatedSentences !== 4) {
+            throw new Error('All four sample annotations must link to translated sentences');
+        }
+        await frame.locator('.markdown-note-link[data-annotation-id="PREVIEW4"] .markdown-note-quote')
+            .click(clickOptions);
+        await frame.waitForFunction(() => {
+            const shadow = window.__mkteroPreview.view.host.shadowRoot;
+            const port = shadow.querySelector('.cm-scroller').getBoundingClientRect();
+            const highlights = shadow.querySelectorAll('.cm-mktero-pdf-annotation[data-annotation-id="PREVIEW4"]');
+            return [...highlights].some(node => {
+                const rect = node.getBoundingClientRect();
+                return node.textContent.includes('它在混合三栏以上') && rect.bottom > port.top && rect.top < port.bottom;
+            });
+        }, null, { timeout: 3000 });
+        result.translatedAnnotations = annotatedSentences;
         result.passed = result.title.startsWith('PASS ') && result.storage === 'SecurityError';
     }
     catch (error) {
