@@ -70,6 +70,7 @@ import {
 import {
     TranslationRequestTracker,
 } from './ai/translation-request-tracker.js';
+import { createZoteroTranslationAttachments } from './platform/zotero-translation-attachments.js';
 import { MarkdownDocumentService } from './core/markdown-document-service.js';
 import { createZoteroMinerUImportIndex } from './cache/mineru-import-index.js';
 import { createImportedMinerUReadiness } from './cache/imported-mineru-readiness.js';
@@ -448,6 +449,7 @@ const runtime = {
     readinessColumn: null,
     disposeConversionProfileObserver: null,
     translationService: null,
+    translationAttachments: null,
     revisionStore: null,
     readingPositions: null,
     revisionSessions: null,
@@ -594,6 +596,14 @@ globalThis.startup = async function startup({ id, rootURI }) {
         cache,
         getSettings: () => getAISettings(Zotero),
         onCacheError: error => logMkteroError(error),
+    });
+    runtime.translationAttachments = createZoteroTranslationAttachments({
+        zotero: Zotero,
+        readFile: (path, maxBytes) => IOUtils.read(path, { maxBytes }),
+        writeTemporaryFile: options => writeZoteroTemporaryFile({
+            ...options,
+            tempRoot: Zotero.getTempDirectory().path,
+        }),
     });
     runtime.translationRequests = new TranslationRequestTracker({
         createAbortController: createZoteroAbortController,
@@ -1510,6 +1520,8 @@ globalThis.shutdown = function shutdown() {
     runtime.disposeConversionProfileObserver = null;
     runtime.disposeReadingActivityProviderObserver = null;
     runtime.disposeReadingActivityAccountObserver = null;
+    runtime.translationAttachments?.dispose();
+    runtime.translationAttachments = null;
     runtime.translationService = null;
     runtime.translationRequests = null;
     runtime.revisionStore = null;
@@ -1737,6 +1749,8 @@ async function openItemAsMarkdown(itemID, {
             opened = true;
             void rememberMarkdownReadiness(itemID, cachedSelection.result);
             refreshPublishedAnnotations(itemID);
+            void loadSyncedDocumentTranslations(presentation, itemID)
+                .catch(error => logMkteroError(error));
             return true;
         }
         finally {
@@ -2188,6 +2202,8 @@ async function publishConversionResult(presentation, itemID, result, signal) {
         }
     );
     refreshPublishedAnnotations(itemID);
+    void loadSyncedDocumentTranslations(presentation, itemID, signal)
+        .catch(error => logMkteroError(error));
 }
 
 async function prepareConversionReadyChanges(itemID, result, signal) {
@@ -3410,6 +3426,10 @@ async function translateDocument(documentID, {
         if (runtime.presenter?.get(documentID) !== presentation) return result;
         if (presentation.model.translationRequestedTargetLanguage
             !== targetLanguage) return result;
+        void publishDocumentTranslation(
+            presentation.model.sourceItemID ?? presentation.model.itemID ?? documentID,
+            presentation.model, [result], { replace: !result.cacheHit }
+        ).catch(error => logMkteroError(error));
         const preservePrevious = result.partial
             && previousTranslation?.status === 'ready';
         const languageState = cachedLanguageStateAfterTranslation(
@@ -3809,6 +3829,8 @@ async function attachCachedDocumentTranslation(result, signal) {
         if (signal?.aborted) throw signal.reason || new Error('Aborted');
     } while (getAISettings(Zotero).targetLanguage !== targetLanguage);
     variants = (variants || []).filter(hasCurrentTranslationProfile);
+    void publishDocumentTranslation(result.itemID, result, variants, { signal })
+        .catch(error => logMkteroError(error));
     const languageState = {
         ...cachedTranslationLanguageState(variants),
         translationOutdatedLanguages: outdatedLanguages,
@@ -3831,6 +3853,62 @@ async function attachCachedDocumentTranslation(result, signal) {
             configuredTargetLanguage: targetLanguage,
         }),
     };
+}
+
+async function prepareDocumentTranslationAttachment(model) {
+    return runtime.translationService?.prepareTranslationAttachment?.({
+        documentKey: model.cacheKey,
+        markdown: model.markdown,
+        chromeRanges: model.chromeRanges,
+        figureMap: model.figureMap,
+    });
+}
+
+async function publishDocumentTranslation(itemID, model, variants, { replace = false, signal } = {}) {
+    const attachments = runtime.translationAttachments;
+    if (!itemID || !attachments?.enabled() || signal?.aborted
+        || !variants.some(variant => !variant.partial)) return;
+    const format = await prepareDocumentTranslationAttachment(model);
+    if (!format || signal?.aborted) return;
+    for (const variant of variants) {
+        if (signal?.aborted) return;
+        const record = format.encode(variant);
+        if (record) await attachments.publish(itemID, format.identity, record, { replace, signal });
+    }
+}
+
+async function readSyncedDocumentTranslations(itemID, model, options) {
+    const attachments = runtime.translationAttachments;
+    if (!itemID || !attachments?.enabled()) return [];
+    const format = await prepareDocumentTranslationAttachment(model);
+    return format ? attachments.read(itemID, format.identity, format.decode, options) : [];
+}
+
+async function loadSyncedDocumentTranslations(presentation, itemID, signal) {
+    const { model } = presentation;
+    const { cacheKey, markdown, translationCachedLanguages = [] } = model;
+    const variants = await readSyncedDocumentTranslations(itemID, model, {
+        skipLanguages: translationCachedLanguages,
+        signal,
+    });
+    const current = presentation.model;
+    if (!variants.length || presentation.closed || signal?.aborted
+        || current.cacheKey !== cacheKey || current.markdown !== markdown
+        || !runtime.translationAttachments?.enabled()) return;
+    const complete = new Set(current.translationCachedLanguages || []);
+    const preferred = variants.find(entry => entry.targetLanguage === current.translationConfiguredTargetLanguage);
+    const visible = preferred || variants[0];
+    for (const variant of variants) complete.add(variant.targetLanguage);
+    runtime.presenter?.update(presentation, {
+        translationCachedLanguages: [...complete],
+        translationPartialLanguages: (current.translationPartialLanguages || []).filter(language => !complete.has(language)),
+        ...(['ready', 'loading'].includes(current.translationStatus)
+            ? {}
+            : documentTranslationChanges(visible, {
+                translationView: current.translationView || 'original',
+                configuredTargetLanguage: current.translationConfiguredTargetLanguage,
+            })),
+    });
 }
 
 async function listOutdatedTranslationLanguages(documentKey) {
@@ -3898,7 +3976,7 @@ async function activateCachedTranslationLanguage(
     const documentID = presentation.model.documentID;
     const documentKey = String(presentation.model.cacheKey || '');
     const markdown = String(presentation.model.markdown || '');
-    const cached = await runtime.translationService
+    let cached = await runtime.translationService
         ?.getCachedDocumentTranslation?.({
             documentKey,
             markdown,
@@ -3906,6 +3984,13 @@ async function activateCachedTranslationLanguage(
             chromeRanges: presentation.model.chromeRanges,
             figureMap: presentation.model.figureMap,
         });
+    if (!cached || cached.partial) {
+        const itemID = presentation.model.sourceItemID ?? presentation.model.itemID ?? documentID;
+        const synced = await readSyncedDocumentTranslations(itemID, presentation.model, {
+            skipLanguages: AI_TARGET_LANGUAGES.filter(language => language !== targetLanguage),
+        }).catch(() => []);
+        if (synced.length && runtime.translationAttachments?.enabled()) [cached] = synced;
+    }
     const current = runtime.presenter?.get(documentID);
     if (current !== presentation
         || presentation.model.status !== 'ready'
@@ -5439,8 +5524,8 @@ function createMarkdownExportID() {
         || String(Date.now()) + '-' + Math.random().toString(36).slice(2);
 }
 
-async function writeZoteroTemporaryFile({ name, data }) {
-    const tempRoot = PathUtils.tempDir
+async function writeZoteroTemporaryFile({ name, data, tempRoot }) {
+    tempRoot ||= PathUtils.tempDir
         || PathUtils.join(Zotero.Profile.dir, 'mktero-temp');
     const randomID = globalThis.crypto?.randomUUID?.()
         || String(Date.now()) + '-' + Math.random().toString(36).slice(2);

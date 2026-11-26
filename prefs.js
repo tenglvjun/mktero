@@ -15,6 +15,7 @@ pref("extensions.mktero.accountRefreshLock", "");
 pref("extensions.mktero.accountRefreshAttemptID", "");
 pref("extensions.mktero.mistralApiKey", "");
 pref("extensions.mktero.cacheEnabled", true);
+pref("extensions.mktero.translationAttachmentSync", false);
 pref("extensions.mktero.readerFontSize", 18);
 pref("extensions.mktero.readerFont", "system-serif");
 pref("extensions.mktero.readerSourcePeek", true);

@@ -164,6 +164,22 @@
             </html:label>
 
             <html:label class="mktero-setting-row mktero-switch-row"
+                        for="mktero-translation-attachment-sync">
+                <html:span class="mktero-setting-copy">
+                    <html:strong data-i18n="preferences.translationSync.label"></html:strong>
+                    <html:small data-i18n="preferences.translationSync.help"></html:small>
+                </html:span>
+                <html:span class="mktero-switch-control">
+                    <html:input id="mktero-translation-attachment-sync"
+                                class="mktero-switch-input"
+                                type="checkbox"
+                                role="switch"
+                                preference="extensions.mktero.translationAttachmentSync" />
+                    <html:span class="mktero-switch" aria-hidden="true"></html:span>
+                </html:span>
+            </html:label>
+
+            <html:label class="mktero-setting-row mktero-switch-row"
                         for="mktero-cache-enabled">
                 <html:span class="mktero-setting-copy">
                     <html:strong data-i18n="preferences.cache.reuseLabel"></html:strong>
