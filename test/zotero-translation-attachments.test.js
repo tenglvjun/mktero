@@ -15,6 +15,7 @@ function createFixture() {
     let libraryType = 'user';
     let failWrite = false;
     let failSave = false;
+    let onWrite;
     let writes = 0;
     const syncState = {
         SYNC_STATE_TO_DOWNLOAD: 1,
@@ -95,6 +96,7 @@ function createFixture() {
             if (failWrite) throw new Error('Could not replace file');
             writes++;
             files.set(path, data);
+            onWrite?.();
         },
         writeTemporaryFile: async ({ name, data }) => {
             files.set(name, data);
@@ -111,6 +113,7 @@ function createFixture() {
         set libraryType(value) { libraryType = value; },
         set failWrite(value) { failWrite = value; },
         set failSave(value) { failSave = value; },
+        set onWrite(callback) { onWrite = callback; },
     };
 }
 
@@ -204,11 +207,25 @@ test('trashes only verified duplicates after a successful replacement and upload
     assert.ok(!older.deleted);
 
     fixture.failSave = false;
+    older.path = null;
     await store.publish(11, identity, newer, options);
     assert.equal(current.attachmentSyncState, 'to_upload');
     assert.equal(current.key, '3');
     assert.equal(fixture.writes, 1);
+    assert.equal(fixture.downloads, 1);
     assert.ok(older.deleted);
     assert.ok(!current.deleted && !unverified.deleted);
     assert.ok(unrelated.every(item => !item.deleted));
+});
+
+test('preserves a native sync conflict that appears while writing the attachment', async () => {
+    const fixture = createFixture();
+    const store = fixture.create();
+    await store.publish(11, identity, record);
+    const [item] = fixture.attachments;
+    fixture.onWrite = () => { item.attachmentSyncState = fixture.syncState.SYNC_STATE_IN_CONFLICT; };
+    await assert.rejects(store.publish(11, identity, newer, { replace: true, decode: accept }),
+        /changed during publication/);
+    assert.equal(item.attachmentSyncState, fixture.syncState.SYNC_STATE_IN_CONFLICT);
+    assert.equal(fixture.creates, 1);
 });

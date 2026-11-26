@@ -933,10 +933,12 @@ test('uses the language menu without changing the default translation language',
     const { MarkdownTabPresenter } = await import('../src/ui/markdown-tab-presenter.js');
     const update = MarkdownTabPresenter.prototype.update;
     let translationAction;
+    let readerPresentation;
     t.mock.method(MarkdownTabPresenter.prototype, 'update', function (presentation, changes) {
         const result = update.call(this, presentation, changes);
         if (changes.status === 'ready' && presentation.model.documentID === 42) {
             translationAction = presentation.model.onTranslateDocument;
+            readerPresentation = presentation;
         }
         return result;
     });
@@ -1315,7 +1317,8 @@ test('uses the language menu without changing the default translation language',
         toolbarButtons[0].click();
         const syncedShadow = (await waitFor(() => mainWindow.tabRoot('tab-4'))).shadowRoot;
         const syncedMode = syncedShadow.querySelector('[data-translation-view="translated"]');
-        await waitFor(() => !syncedMode.disabled);
+        await waitFor(() => readerPresentation.model.translatedMarkdown === '# 同步新版论文');
+        assert.equal(syncedMode.disabled, false);
         syncedMode.click();
         syncedShadow.querySelector('[data-translation-language="zh-CN"]').click();
         await waitFor(() => syncedShadow.querySelector('.cm-content').textContent.includes('同步新版论文'));

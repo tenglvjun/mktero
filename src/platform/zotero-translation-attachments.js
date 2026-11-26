@@ -59,10 +59,10 @@ export function createZoteroTranslationAttachments({
         return hasSyncState(item, 'to_download');
     }
 
-    async function readCopy(item, language, decode, active, { download = true } = {}) {
+    async function readCopy(item, language, decode, active) {
         if (!active() || item.deleted) return null;
         let path = await item.getFilePathAsync();
-        if (download && (!path || awaitingDownload(item)) && active() && !item.deleted
+        if ((!path || awaitingDownload(item)) && active() && !item.deleted
             && !awaitingConflictResolution(item) && !hasSyncState(item, 'to_upload')
             && !pendingUploads.has(item.id)) {
             let request = downloads.get(item.id);
@@ -94,7 +94,7 @@ export function createZoteroTranslationAttachments({
             pendingUploads.delete(item.id);
         }
         catch (error) {
-            item.attachmentSyncState = previousState;
+            if (hasSyncState(item, 'to_upload')) item.attachmentSyncState = previousState;
             throw error;
         }
     }
@@ -111,6 +111,10 @@ export function createZoteroTranslationAttachments({
             await writeStoredFile(copy.path, data);
             pendingUploads.add(item.id);
         }
+        if (item.deleted || awaitingConflictResolution(item) || awaitingDownload(item)) {
+            pendingUploads.delete(item.id);
+            throw new Error('Zotero translation file changed during publication');
+        }
         // The atomic replace may have succeeded before a previous save failed.
         if (pendingUploads.has(item.id)) await queueUpload(item);
         if (!active() || item.deleted || awaitingConflictResolution(item) || awaitingDownload(item)) return;
@@ -119,7 +123,7 @@ export function createZoteroTranslationAttachments({
             const old = duplicate.item;
             if (awaitingConflictResolution(old)) continue;
             try {
-                if (await readCopy(old, language, decode, active, { download: false })) redundant.push(old);
+                if (await readCopy(old, language, decode, active)) redundant.push(old);
             }
             catch { /* Leave unreadable copies in the library. */ }
         }
