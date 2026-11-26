@@ -1277,6 +1277,64 @@ test('uses the language menu without changing the default translation language',
         }
     );
 
+    await t.test('prefers a received translation over the older complete local translation', async () => {
+        const cachedBefore = await cache.getTranslationByLanguage(cacheKey, 'zh-CN');
+        const service = new MarkdownTranslationService({
+            getSettings: () => getAISettings(globalThis.Zotero),
+            aiGateway: {
+                generateText: async ({ messages }) => ({
+                    text: headingTranslationReply('同步新版论文')({ messages }),
+                }),
+            },
+        });
+        const fresh = await service.translateDocument({
+            documentKey: cacheKey, markdown, targetLanguage: 'zh-CN',
+        });
+        const format = await service.prepareTranslationAttachment({ documentKey: cacheKey, markdown });
+        const attachmentPath = path.join(profilePath, 'translation.json');
+        await writeFile(attachmentPath, JSON.stringify(format.encode(fresh)));
+        Object.assign(globalThis.Zotero, {
+            Libraries: { get: () => ({ libraryType: 'user' }) },
+            URI: { getItemURI: item => 'pdf/' + item.key },
+            Relations: {
+                relatedItemPredicate: 'dc:relation',
+                getByPredicateAndObject: async (_type, _predicate, uri) => uri === 'pdf/PDFKEY42' ? [{
+                    id: 99, key: 'TRANSKEY', dateAdded: '2026-11-26', libraryID: 1,
+                    attachmentFilename: 'mktero-translation-PDFKEY42-' + format.identity + '-zh-CN.json',
+                    attachmentContentType: 'application/json',
+                    isStoredFileAttachment: () => true,
+                    getField: () => 'Mktero Translation · zh-CN',
+                    getFilePathAsync: async () => attachmentPath,
+                }] : [],
+            },
+        });
+        preferences.set('extensions.mktero.translationAttachmentSync', true);
+        preferences.set('sync.storage.enabled', true);
+
+        mainWindow.Zotero_Tabs.close('tab-3');
+        toolbarButtons[0].click();
+        const syncedShadow = (await waitFor(() => mainWindow.tabRoot('tab-4'))).shadowRoot;
+        const syncedMode = syncedShadow.querySelector('[data-translation-view="translated"]');
+        await waitFor(() => !syncedMode.disabled);
+        syncedMode.click();
+        syncedShadow.querySelector('[data-translation-language="zh-CN"]').click();
+        await waitFor(() => syncedShadow.querySelector('.cm-content').textContent.includes('同步新版论文'));
+        assert.equal(providerRequests.length, 7);
+        assert.deepEqual(await cache.getTranslationByLanguage(cacheKey, 'zh-CN'), cachedBefore);
+
+        preferences.set('extensions.mktero.translationAttachmentSync', false);
+        mainWindow.Zotero_Tabs.close('tab-4');
+        toolbarButtons[0].click();
+        const localShadow = (await waitFor(() => mainWindow.tabRoot('tab-5'))).shadowRoot;
+        const localMode = localShadow.querySelector('[data-translation-view="translated"]');
+        await waitFor(() => !localMode.disabled);
+        localMode.click();
+        localShadow.querySelector('[data-translation-language="zh-CN"]').click();
+        await waitFor(() => localShadow.querySelector('.cm-content').textContent.includes('论文'));
+        assert.doesNotMatch(localShadow.querySelector('.cm-content').textContent, /同步新版/);
+        assert.equal(providerRequests.length, 7);
+    });
+
     const targetObserverID = preferenceObservers.get(
         'extensions.mktero.aiTargetLanguage'
     ).id;

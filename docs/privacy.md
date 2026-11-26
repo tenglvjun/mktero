@@ -10,7 +10,7 @@ This page lists what Mktero sends, where it keeps data, and what local cleanup r
 - Before reusing a hosted cache, Mktero sends the PDF SHA-256, byte size, and content type to confirm the applicable parser profile. This lookup sends no PDF bytes and uses no conversion allowance.
 - Local llm-for-zotero imports leave the source unchanged. Import and reopening upload neither the PDF nor the result.
 - Credentials, tokens, caches, corrections, translations, reading positions, local highlights, and the research-note target preference are unencrypted in the active Zotero profile. Mktero does not sync them.
-- Opt-in translation sync creates a separate stored attachment in your personal Zotero library for each completed translation. Zotero handles file sync.
+- Opt-in translation sync uses a stored attachment in your personal Zotero library for each source and language. A completed retranslation updates that attachment. Zotero handles file sync.
 - PDF annotations, Zotero notes, and snapshots sync according to Zotero settings. Mktero does not send notes anywhere.
 - Reference, citation, and translation requests are bounded and local-first. Logs exclude API tokens, presigned URLs, PDF bytes, and authenticated responses.
 - Problem reports stay on this computer. Copying or saving creates a redacted file; this version does not upload it.
