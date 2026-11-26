@@ -162,6 +162,27 @@ test('retranslation updates the stored file under the same key and queues it for
     assert.equal(fixture.writes, 1);
 });
 
+test('reads an existing local translation with either sync setting off', async () => {
+    const fixture = createFixture();
+    const store = fixture.create();
+    await store.publish(11, identity, record);
+    const [item] = fixture.attachments;
+
+    fixture.fileSync = false;
+    assert.deepEqual(await store.read(11, identity, accept), [record]);
+    fixture.fileSync = true;
+    fixture.optedIn = false;
+    item.contents = new TextEncoder().encode(JSON.stringify(newer));
+    item.attachmentSyncState = fixture.syncState.SYNC_STATE_TO_DOWNLOAD;
+    assert.deepEqual(await store.read(11, identity, accept), [record]);
+
+    await store.publish(11, identity, newer, { replace: true, decode: accept });
+    assert.equal(fixture.writes, 0);
+    item.path = null;
+    assert.deepEqual(await store.read(11, identity, accept), []);
+    assert.equal(fixture.downloads, 0);
+});
+
 test('loads a pending remote update even when the old file is present', async () => {
     const fixture = createFixture();
     const store = fixture.create();
