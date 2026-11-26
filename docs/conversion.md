@@ -25,6 +25,8 @@ The operator can select MinerU-VLM or MinerU Pipeline independently for each Min
 
 Before using a hosted cache, Mktero looks up the applicable parser profile with only the PDF SHA-256, byte size, and content type. The lookup uploads no PDF and uses no conversion allowance. If the model changes, the next open looks for a result with that model. It may need conversion and another PDF upload; new results follow normal quota accounting. Switching back can reuse a retained result for the previous model.
 
+The hosted service deletes result ZIPs after a configurable idle period of 14 days by default. Reuse on the server or issuing a new download link renews that period. If a conversion needs a result that has expired and no matching local cache is available, Mktero uploads the PDF again.
+
 Retained content can be read offline, but offline reading cannot verify the current hosted model. Authentication failures and invalid or inconsistent target metadata are reported. Explicit local imports keep working offline without this hosted lookup.
 
 Corrections belong to the parser identity that produced the reading. A hosted `Pipeline` reading never opens a revision saved for `VLM`, and a route that switches back to `VLM` still finds the `VLM` corrections, including ones recorded under an older `VLM` parser profile.
