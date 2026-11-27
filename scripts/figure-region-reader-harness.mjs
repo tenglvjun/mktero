@@ -139,8 +139,8 @@ export async function runFigureReaderValidation({
             const shadow = readerShadow(presentation);
             const reference = shadow.querySelector('.cm-mktero-figure-reference');
             requireCondition(reference, 'Figure reference is missing');
-            reference.dispatchEvent(new owner.MouseEvent('mouseover', { bubbles: true }));
-            await waitForImages(shadow, owner);
+            reference.dispatchEvent(new owner.MouseEvent('mousemove', { bubbles: true }));
+            await waitForImages(shadow, owner, '.mktero-figure-preview-popup img[src]');
             const popup = shadow.querySelector('.mktero-figure-preview-popup');
             requireCondition(popup?.querySelectorAll('img').length === 1, 'Figure preview lost the complete image');
             const sourceButton = popup.querySelector('.mktero-figure-source-button');
@@ -310,13 +310,15 @@ function trackObjectURLs(owner) {
     } };
 }
 
-async function waitForImages(root, owner) {
+async function waitForImages(root, owner, requiredImage = null) {
     for (let attempt = 0; attempt < 100; attempt++) {
         const images = [...root.querySelectorAll('img[src]')]
             .filter(image => image.getAttribute('src'));
-        if (images.every(image => image.complete && image.naturalWidth > 0)) return;
+        if ((!requiredImage || root.querySelector(requiredImage))
+            && images.every(image => image.complete && image.naturalWidth > 0)) return;
         await new Promise(resolve => owner.setTimeout(resolve, 20));
     }
+    requireCondition(!requiredImage || root.querySelector(requiredImage), 'Figure preview lost the complete image');
     const pending = [...root.querySelectorAll('img[src]')]
         .filter(image => image.getAttribute('src') && (!image.complete || !image.naturalWidth))
         .map(image => ({ className: image.className, namespace: image.namespaceURI,

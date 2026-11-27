@@ -96,6 +96,9 @@ const MINERU_VERTICAL_PANEL_MARKER_SPACES = 3;
 const MAX_PANEL_LABEL_LENGTH = 80;
 const ISOLATED_PANEL_LETTER_PATTERN = /^[A-Za-z]\.?$/u;
 const FIGURE_LAYOUT_MARKER_PATTERN = /^<!--\s*(?:mktero-figure-layout|mktero-mistral-figure-grid):\s*columns=(\d{1,2})\s+rows=([\d,]{1,80})(?:\s+spans=([\d,]{1,256}))?\s*-->$/iu;
+export const TEXT_FIGURE_MARKER = '<!-- mktero-text-figure -->';
+const MAX_TEXT_FIGURE_LINES = 24;
+const MAX_TEXT_FIGURE_LINE_LENGTH = 8_192;
 
 export function parseFigureLayoutMarker(value) {
     const source = String(value || '').replace(/\r?\n$/, '').trim();
@@ -286,12 +289,20 @@ export function findAcademicFigureGroups(markdown) {
     for (let index = 0; index < lines.length; index++) {
         if (blockedLines.has(index)) continue;
 
+        if (lines[index].text === TEXT_FIGURE_MARKER) {
+            const figure = markedTextFigure(lines, index, blockedLines);
+            if (figure) {
+                groups.push(figure.group);
+                index = figure.lastIndex;
+                continue;
+            }
+        }
         const gridMarker = parseFigureLayoutMarker(lines[index].raw);
         if (gridMarker) {
             let imageStart = nextNonBlankLine(lines, index + 1);
             const leadingCaption = imageStart < lines.length
                 && !blockedLines.has(imageStart)
-                ? parseCaptionLine(lines[imageStart].raw)
+                ? parseMarkedFigureCaption(lines[imageStart].raw)
                 : null;
             if (leadingCaption) {
                 imageStart = nextNonBlankLine(lines, imageStart + 1);
@@ -306,7 +317,7 @@ export function findAcademicFigureGroups(markdown) {
             );
             const trailingCaption = captionIndex < lines.length
                 && !blockedLines.has(captionIndex)
-                ? parseCaptionLine(lines[captionIndex].raw)
+                ? parseMarkedFigureCaption(lines[captionIndex].raw)
                 : null;
             const embeddedCaption = images.length
                 ? captionFromImageLine(lines[images.at(-1).index].raw)
@@ -316,7 +327,7 @@ export function findAcademicFigureGroups(markdown) {
             if (caption
                 && imageCount === expectedCount
                 && gridMarker.columns === Math.max(...gridMarker.rows)
-                && imageCount > 1) {
+                && (imageCount > 1 || Boolean(trailingCaption && images[0]?.panelLabel))) {
                 const layout = gridMarker.columns === 1
                     ? 'vertical'
                     : gridMarker.rows.length === 1
@@ -786,6 +797,34 @@ export function findAcademicFigures(markdown) {
     return figures.sort((left, right) => left.from - right.from);
 }
 
+export function parseTextFigureBlock(markdown) {
+    const maxLength = TEXT_FIGURE_MARKER.length + 2
+        + MAX_TEXT_FIGURE_LINES * (MAX_TEXT_FIGURE_LINE_LENGTH + 2);
+    if (markdown.length > maxLength || !markdown.startsWith(TEXT_FIGURE_MARKER)) return null;
+    const lines = markdownLineRecords(markdown);
+    if (lines[0]?.text !== TEXT_FIGURE_MARKER) return null;
+    const figure = markedTextFigure(lines, 0);
+    return figure && !markdown.slice(figure.group.to).trim() ? figure.group : null;
+}
+
+function markedTextFigure(lines, start, blockedLines) {
+    const quote = [];
+    let index = start + 1;
+    while (index < lines.length && !blockedLines?.has(index) && /^>(?: |$)/u.test(lines[index].text)) {
+        if (quote.length === MAX_TEXT_FIGURE_LINES || lines[index].text.length > MAX_TEXT_FIGURE_LINE_LENGTH) return null;
+        quote.push(lines[index].text.slice(2));
+        index++;
+    }
+    const caption = parseMarkedFigureCaption(quote.at(-1));
+    if (!caption || quote.length < 4 || !quote[0]?.trim() || quote.at(-2).trim()
+        || !quote.slice(1, -1).some(line => /^- \S/u.test(line))) return null;
+    return {
+        lastIndex: index - 1,
+        group: { from: lines[start].from, to: lines[index - 1].to, caption, images: [],
+            textBody: quote.slice(0, -1).join('\n').trimEnd() },
+    };
+}
+
 export function findAcademicTableGroups(markdown) {
     const source = String(markdown || '');
     const lines = markdownLineRecords(source);
@@ -817,7 +856,7 @@ export function findAcademicTableGroups(markdown) {
             );
             const trailingCaption = captionIndex < lines.length
                 && !blockedLines.has(captionIndex)
-                ? parseAcademicTableCaption(lines[captionIndex].text)
+                ? parseTableCaptionLine(lines[captionIndex].text)
                 : null;
             if (trailingCaption) {
                 groups.push({
@@ -830,7 +869,7 @@ export function findAcademicTableGroups(markdown) {
                 continue;
             }
         }
-        let caption = parseAcademicTableCaption(lines[index].text);
+        let caption = parseTableCaptionLine(lines[index].text);
         let tableIndex = nearbyLineIndex(lines, index + 1);
         if (!caption) {
             const heading = parseAcademicTableHeading(lines[index].text);
@@ -903,7 +942,15 @@ function extendTableGroup(group, lines, blockedLines) {
 }
 
 function isAcademicTableCaptionLine(text) {
-    return Boolean(parseAcademicTableCaption(text) || parseAcademicTableHeading(text));
+    return Boolean(parseTableCaptionLine(text) || parseAcademicTableHeading(text));
+}
+
+function parseTableCaptionLine(text) {
+    const caption = parseAcademicTableCaption(text);
+    if (caption && !/[.:]$/u.test(caption.label)
+        && /^(?:shows?|presents?|displays?|illustrates?|depicts?|summari[sz]es?|compares?|reports?|gives?|lists?|provides?|contains?)\b/iu
+            .test(caption.description)) return null;
+    return caption;
 }
 
 export function normalizeMisassignedAcademicCaptions(markdown) {
@@ -972,7 +1019,7 @@ function applyCaptionEdits(source, edits) {
     return normalized;
 }
 
-function parseAcademicTableHeading(value) {
+export function parseAcademicTableHeading(value) {
     const source = String(value || '');
     const match = ACADEMIC_TABLE_HEADING_PATTERN.exec(source)
         || ACADEMIC_TABLE_PLAIN_HEADING_PATTERN.exec(source);
@@ -1155,7 +1202,11 @@ function collectMarkedFigureImages(lines, startIndex, blockedLines, expectedCoun
         && !blockedLines.has(index)
         && isMarkdownImageLine(lines[index].raw)) {
         if (images.length === expectedCount) return [];
-        images.push({ index, source: lines[index].text.trim() });
+        const source = lines[index].text.trim();
+        const alt = CAPTIONED_IMAGE_LINE_PATTERN.exec(source)?.[1];
+        const label = alt && unescapeImageDescription(alt);
+        const panelLabel = /^\(\s*[a-z]\s*\)\s+\S/iu.test(label || '') ? label : '';
+        images.push({ index, source, ...(panelLabel ? { panelLabel, panelLabelPosition: 'after' } : {}) });
         if (captionFromImageLine(lines[index].raw)) break;
         index = nextNonBlankLine(lines, index + 1);
     }
@@ -1621,6 +1672,10 @@ function parseCaptionLine(line) {
     return parseAcademicFigureCaption(
         source.slice(0, source.length - ending.length)
     );
+}
+
+function parseMarkedFigureCaption(line) {
+    return parseCaptionLine(line) || parseLooseAcademicFigureCaption(line);
 }
 
 function captionFromImageLine(line) {

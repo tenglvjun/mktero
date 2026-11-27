@@ -7663,6 +7663,76 @@ test('shows resolved references cited inside a shared figure caption', () => {
     dom.window.close();
 });
 
+test('shows bibliography previews for escaped citations inside image descriptions', t => {
+    const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
+        pretendToBeVisual: true,
+    });
+    const { document } = dom.window;
+    const markdown = [
+        '# Paper',
+        '',
+        'Earlier work [1] established the method.',
+        '',
+        '![Fig. 1. F\\[2,3\\] = 6. Adopted from \\[2,3\\], with $x^2$ and \\[9\\].](images/figure.png)',
+        '',
+        '![Fig. 2. See \\\\\\[1, 2–3\\\\\\].](images/second.png)',
+        '',
+        '![Fig. 3. See [\\[2\\]](https://example.org), adapted from \\[2\\].](images/third.png)',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. Initial method. Journal. 2024.',
+        '',
+        '[2] Beta B. Figure source. Journal. 2023.',
+        '',
+        '[3] Gamma G. Supporting analysis. Journal. 2022.',
+    ].join('\n');
+    const editor = createInlineMarkdownEditor({
+        document,
+        parent: document.querySelector('#editor'),
+        initialMarkdown: markdown,
+        resolveImageURL: path => `blob:mktero-${path}`,
+        openLink: () => {},
+    });
+    t.after(() => {
+        editor.destroy();
+        dom.window.close();
+    });
+
+    const bodyCitation = document.querySelector('.cm-line .cm-mktero-citation');
+    assert.equal(bodyCitation?.getAttribute('data-citation-ids'), 'number:1');
+    const [firstCaption, secondCaption, thirdCaption] = document.querySelectorAll('figcaption');
+    const citation = firstCaption?.querySelector('.cm-mktero-citation');
+    assert.equal(citation?.textContent, '2');
+    assert.equal(citation.getAttribute('data-citation-ids'), 'number:2');
+    assert.equal(Number(citation.getAttribute('data-citation-from')), markdown.lastIndexOf('[2,3\\]') + 1);
+    assert.equal(citation.previousSibling?.textContent?.endsWith('Adopted from ['), true);
+    hoverReference(dom.window, citation);
+    assert.match(
+        document.querySelector('.mktero-citation-popup')?.textContent || '',
+        /Beta B\. Figure source\. Journal\. 2023\./
+    );
+    assert.deepEqual(
+        [...firstCaption.querySelectorAll('.cm-mktero-citation')].map(marker => marker.textContent),
+        ['2', '3']
+    );
+    assert.match(firstCaption.textContent, /\[9\]/);
+    assert.ok(firstCaption.querySelector('.math-inline'));
+    assert.deepEqual(
+        [...secondCaption.querySelectorAll('.cm-mktero-citation')].map(marker => (
+            [marker.textContent, marker.getAttribute('data-citation-ids')]
+        )),
+        [['1', 'number:1'], ['2–3', 'number:2 number:3']]
+    );
+    const link = thirdCaption.querySelector('a');
+    assert.equal(link.getAttribute('href'), 'https://example.org');
+    assert.equal(link.textContent, '[2]');
+    assert.equal(link.querySelector('.cm-mktero-citation'), null);
+    assert.equal(thirdCaption.querySelectorAll('.cm-mktero-citation').length, 1);
+    assert.equal(thirdCaption.querySelector('.cm-mktero-citation').textContent, '2');
+    assert.equal(editor.getMarkdown(), markdown);
+});
+
 test('previews a rendered image with zoom and drag controls', () => {
     const dom = new JSDOM('<!doctype html><div id="editor"></div>', {
         pretendToBeVisual: true,

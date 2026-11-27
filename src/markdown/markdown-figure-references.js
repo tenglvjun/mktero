@@ -85,7 +85,8 @@ function figureTarget(key, figure, markdown) {
         figure: {
             source: figure.renderSource || figure.source,
         },
-        ...(figure.sourceId ? { sourceId: figure.sourceId, location: figure.location } : {}),
+        ...(figure.sourceId ? { sourceId: figure.sourceId } : {}),
+        ...(figure.location ? { location: figure.location } : {}),
     };
 }
 

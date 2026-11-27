@@ -13,6 +13,7 @@ import {
     findInlineMathMatches,
     portableMathSource,
     safeMarkdownLinkURL,
+    unescapeCaptionText,
 } from '../markdown/markdown-html.js';
 import { renderZoteroNoteHTML } from '../markdown/zotero-note-html-renderer.js';
 import { portableMathMarkdown } from '../markdown/portable-markdown.js';
@@ -408,7 +409,11 @@ class RenderedMarkdownWidget extends WidgetType {
         if (table && this.tableCaption && !table.querySelector('caption')) {
             table.prepend(createTableCaption(document, this.tableCaption));
         }
-        installRenderedCitations(container, this.citations);
+        installRenderedCitations(
+            container,
+            this.citations,
+            this.display === 'image' ? { source: this.source, from: this.from } : null
+        );
         if (['math', 'math-display'].includes(this.display)) {
             wrapRenderedMathAnnotations(
                 container,
@@ -4079,7 +4084,8 @@ function renderedRange(node, state, display, context) {
                     state,
                     context,
                     node.from,
-                    node.to
+                    node.to,
+                    display === 'image' ? unescapeCaptionText : visibleMarkdownText
                 )
                 : [],
             annotations,
@@ -4272,7 +4278,7 @@ function annotationsForRange(overlay, from, to) {
     });
 }
 
-function renderedCitationDescriptors(state, context, from, to) {
+function renderedCitationDescriptors(state, context, from, to, visibleText = visibleMarkdownText) {
     return citationAnalysis(state, context).citations
         .filter(citation => citation.from >= from && citation.to <= to)
         .map(citation => renderedCitationDescriptor(
@@ -4280,7 +4286,8 @@ function renderedCitationDescriptors(state, context, from, to) {
             citation,
             from,
             to,
-            context.translate
+            context.translate,
+            visibleText
         ));
 }
 
@@ -4289,7 +4296,8 @@ function renderedCitationDescriptor(
     citation,
     rangeFrom,
     rangeTo,
-    translate
+    translate,
+    visibleText
 ) {
     const markerRange = visibleCitationMarkerRange(
         state,
@@ -4299,14 +4307,17 @@ function renderedCitationDescriptor(
     );
     const markerSource = state.sliceDoc(markerRange.from, markerRange.to);
     const targetPrefix = state.sliceDoc(markerRange.from, citation.from);
-    const target = visibleMarkdownText(
+    const target = visibleText(
         state.sliceDoc(citation.from, citation.to)
     );
     return {
         key: `${citation.from}:${citation.to}:${citation.referenceIds.join(',')}`,
+        from: citation.from,
+        to: citation.to,
+        text: target,
         markerFrom: markerRange.from,
-        marker: visibleMarkdownText(markerSource),
-        targetOffset: visibleMarkdownText(targetPrefix).length,
+        marker: visibleText(markerSource),
+        targetOffset: visibleText(targetPrefix).length,
         targetLength: target.length,
         className: citationClassName(citation),
         attributes: citationAttributes(citation, translate),

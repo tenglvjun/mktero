@@ -2,8 +2,10 @@ import {
     escapeMarkdownLinkDestination,
     normalizeMarkdownLinkURL,
 } from '../../markdown/markdown-links.js';
-import { escapeImageDescription, parseAcademicFigureCaption, parseLooseAcademicFigureCaption } from '../../markdown/markdown-figures.js';
-import { planFigureLayouts } from '../../markdown/figure-layout-normalizer.js';
+import {
+    escapeImageDescription, parseAcademicFigureCaption, parseLooseAcademicFigureCaption, TEXT_FIGURE_MARKER,
+} from '../../markdown/markdown-figures.js';
+import { figureLayoutMarker, inferGeometryLayout, planFigureLayouts } from '../../markdown/figure-layout-normalizer.js';
 import { noteDirective, SECTION_CLOSE_DIRECTIVE, sectionOpenDirective } from '../../markdown/markdown-directives.js';
 import { NOTE_KIND } from './notes.js';
 import { BLOCK_KIND, BLOCK_ROLE, fragmentText, spansText, unionBBox } from './ir.js';
@@ -40,14 +42,15 @@ const NOTE_KIND_OF_FLOAT = new Map([
 // is written again.
 export function serializeDocumentIR(ir, { vocabulary = createHyphenationVocabulary(ir), composites = [] } = {}) {
     const floats = new Map(ir.blocks.filter(block => block.role === BLOCK_ROLE.FLOAT).map(block => [block.id, block]));
+    const blocksById = new Map(ir.blocks.map(block => [block.id, block]));
     let units = [];
     for (const block of ir.blocks) {
         if (block.sectionStart) units.push(directiveUnit(sectionOpenDirective(block.sectionStart)));
-        units.push(...blockUnits(block, vocabulary, floats));
+        units.push(...blockUnits(block, vocabulary, floats, blocksById));
         if (block.sectionEnd) units.push(directiveUnit(SECTION_CLOSE_DIRECTIVE));
     }
     if (composites?.length) units = placeComposites(units, composites);
-    return assemble(dropEmptySections(applyFigureLayouts(units)));
+    return assemble(dropEmptySections(applyFigureLayouts(placeVerifiedFigureLayouts(units))));
 }
 
 // A section directive line; it has no source location.
@@ -106,7 +109,7 @@ function placeComposites(units, composites) {
     return output;
 }
 
-function blockUnits(block, vocabulary, floats) {
+function blockUnits(block, vocabulary, floats, blocksById) {
     if (SKIPPED_ROLES.has(block.role) || block.captionConsumed) return [];
     if (block.role === BLOCK_ROLE.FLOAT_NOTE && !block.attachedTo) return [];
     // A content footnote of the page is a note; article metadata is a
@@ -121,6 +124,7 @@ function blockUnits(block, vocabulary, floats) {
         return textUnits(block, vocabulary).map(unit => asNote(unit, kind));
     }
     if (block.kind === BLOCK_KIND.DISCARDED) return [];
+    if (block.textFigure) return textFigureUnits(block, vocabulary, blocksById);
     if (block.role === BLOCK_ROLE.HEADING) return headingUnits(block, vocabulary);
     switch (block.kind) {
         case BLOCK_KIND.EQUATION:
@@ -256,17 +260,61 @@ function figureUnits(block) {
     const bodies = block.children.filter(child => child.kind === 'body' && child.assetPath);
     const caption = captionText(block);
     const units = [];
+    const figure = block.verifiedFigure;
+    const descriptions = block.children.filter(child => child.pdfPanelText);
+    const captions = captionChildren(block);
+    const numbered = captions.filter(child => parseAcademicFigureCaption(childText(child)));
+    const separate = !figure && bodies.length === 1 && numbered.length === 1 && captions.length > 1
+        && captions.filter(child => child !== numbered[0]).every(child => isSubcaption(child, numbered[0]));
     if (!bodies.length) units.push(...captionUnits(block));
     for (const [index, body] of bodies.entries()) {
-        units.push(imageUnit(block, body, body.assetPath, index === bodies.length - 1 ? caption : '',
-            block.kind === BLOCK_KIND.CHART ? 'chart' : 'image', 'panel'));
+        const last = index === bodies.length - 1;
+        units.push(imageUnit(block, body, body.assetPath, last ? caption : '',
+            block.kind === BLOCK_KIND.CHART ? 'chart' : 'image', 'panel',
+            figure ? (last ? descriptions : []) : null, separate ? numbered : null));
+    }
+    const main = figure && block.children.find(child => child.id === figure.captionId);
+    if (main) {
+        const unit = childUnit(block, [main], escapeLineStart(childInline(main)),
+            { caption: true }, main.id, 'caption', childText(main));
+        unit.pieces[0].parentId = figure.id;
+        if (main.pdfRegionCaption) {
+            unit.pieces[0].sourceBlockId = main.sourceBlockId;
+            unit.pieces[0].markdown = childInline(main);
+        }
+        units.push(unit);
     }
     units.push(...block.children.filter(child => child.kind === 'figure-text')
+        .filter(child => !figure || !child.pdfPanelText)
         .map(child => childUnit(block, [child], escapeLineStart(childInline(child)), {}, child.id,
             'figure-text', childText(child))));
+    if (separate) {
+        for (const child of captions.filter(child => child !== numbered[0])) {
+            units.push(childUnit(block, [child], escapeLineStart(childInline(child)), {}, child.id,
+                'figure-text', childText(child)));
+        }
+    }
     units.push(...footnoteUnits(block, 'note'));
     if (block.kind === BLOCK_KIND.CHART) units.push(...chartDataUnits(block));
     return units;
+}
+
+function isSubcaption(child, main) {
+    return /^\(\s*[a-z]\s*\)\s+\S/iu.test(childText(child)) && child.bbox && main.bbox
+        && child.bbox[3] <= main.bbox[1] + 2 && main.bbox[1] - child.bbox[3] <= 40;
+}
+
+function textFigureUnits(block, vocabulary, blocksById) {
+    const quoted = unit => {
+        const shift = range => ({ ...range, from: range.from + 2, to: range.to + 2 });
+        return { ...unit, kind: 'text-figure-line', text: `> ${unit.text}`, sourceFrom: 2,
+            fragments: unit.fragments.map(shift), pieces: unit.pieces.map(piece => ({ ...shift(piece), part: 'text-figure' })) };
+    };
+    const marker = text => ({ block: null, kind: 'marker', text, fragments: [] });
+    const [title, ...rows] = block.textFigure.partIds.flatMap(id => textUnits(blocksById.get(id), vocabulary)).map(quoted);
+    const { text } = inlineText(block, vocabulary);
+    const ownCaption = childUnit(block, [block], text, { caption: true }, `${block.id}:text-figure-caption`, 'text', text);
+    return [marker(TEXT_FIGURE_MARKER), title, marker('>'), ...rows, marker('>'), quoted(ownCaption)];
 }
 
 // The data MinerU read from a chart (self-hosted, high effort) follows the
@@ -471,22 +519,26 @@ function childText(child) {
 // crop image keeps its own part, so the figure pipeline never takes it as a
 // panel and the layout planner never puts it in a grid. A panel's caption
 // pieces are one per MinerU caption block, as the region resolver expects.
-function imageUnit(block, body, assetPath, caption, type, part) {
+function imageUnit(block, body, assetPath, caption, type, part, descriptions = null, selectedCaptions = null) {
     const panel = part === 'panel';
     const splitCaption = panel || Boolean(block.pdfFigureProposal);
-    const captions = splitCaption && caption ? captionPieces(block) : [];
+    const captions = descriptions ? captionPieces(descriptions)
+        : splitCaption && caption ? captionPieces(selectedCaptions || captionChildren(block)) : [];
     const alt = splitCaption ? captions.map(piece => piece.alt).join(' ') : caption ? escapeImageDescription(caption) : '';
     const text = `![${alt}](${assetPath})`;
     const bbox = body?.bbox || block.bbox;
     const pieces = [{
         key: body?.id || `${block.id}:body`, part, blockId: block.id, from: 0, to: text.length,
-        pageIndex: block.pageIndex, bbox, text: '', ...(panel ? { assetPath, parentId: block.id } : {}),
+        pageIndex: block.pageIndex, bbox, text: '',
+        ...(panel ? { assetPath, parentId: block.verifiedFigure?.id || block.id } : {}),
     }];
     let offset = 2;
     for (const piece of captions) {
         pieces.push({
-            key: piece.key, part: 'caption', blockId: block.id, from: offset, to: offset + piece.alt.length,
-            pageIndex: block.pageIndex, bbox: piece.bbox, text: piece.text, parentId: block.id,
+            key: piece.key, part: descriptions ? 'figure-text' : 'caption',
+            blockId: block.id, from: offset, to: offset + piece.alt.length,
+            pageIndex: block.pageIndex, bbox: piece.bbox, text: piece.text,
+            parentId: block.verifiedFigure?.id || block.id,
             ...(piece.sourceBlockId ? { sourceBlockId: piece.sourceBlockId, markdown: piece.markdown } : {}),
         });
         offset += piece.alt.length + 1;
@@ -507,12 +559,12 @@ function imageUnit(block, body, assetPath, caption, type, part) {
         pieces,
         skipKey: pieces[0].key,
         captionKeys: captions.map(piece => piece.key),
-        rebuild: nextCaption => imageUnit(block, body, assetPath, nextCaption, type, part),
+        rebuild: nextCaption => imageUnit(block, body, assetPath, nextCaption, type, part, descriptions ? [] : null),
     };
 }
 
-function captionPieces(block) {
-    return captionChildren(block)
+function captionPieces(children) {
+    return children
         .map(child => ({ key: child.id, bbox: child.bbox, text: childText(child),
             ...(child.pdfRegionCaption ? { sourceBlockId: child.sourceBlockId, markdown: childInline(child) } : {}) }))
         .filter(piece => piece.text)
@@ -543,6 +595,32 @@ function wholeFragments(block, text) {
     const fragments = block.fragments.filter(fragment => fragment.bbox);
     if (!fragments.length && block.bbox) fragments.push({ pageIndex: block.pageIndex, bbox: block.bbox });
     return fragments.map(fragment => ({ from: 0, to: text.length, fragment, whole: true }));
+}
+
+// Reunite only the serialized images and legend of a verified group. All
+// other units retain their order, including text and notes between OCR blocks.
+function placeVerifiedFigureLayouts(units) {
+    const groups = new Map();
+    for (const unit of units) {
+        const figure = unit.block?.verifiedFigure;
+        if (!figure || !unit.panel && unit.skipKey !== figure.captionId) continue;
+        const members = groups.get(figure.id) || [];
+        members.push(unit);
+        groups.set(figure.id, members);
+    }
+    const replacements = new Map();
+    for (const members of groups.values()) {
+        const figure = members[0].block.verifiedFigure;
+        const panels = members.filter(unit => unit.panel);
+        const caption = members.find(unit => unit.skipKey === figure.captionId);
+        if (!caption || panels.length !== figure.memberIds.length) continue;
+        const layout = inferGeometryLayout(panels.map(unit => unit.child));
+        if (!layout) continue;
+        const marker = { block: null, kind: 'marker', text: figureLayoutMarker(layout), fragments: [] };
+        for (const member of members) replacements.set(member, []);
+        replacements.set(members[0], [marker, ...layout.order.map(index => panels[index]), caption]);
+    }
+    return units.flatMap(unit => replacements.get(unit) || [unit]);
 }
 
 // A run of separate images that share one academic caption becomes a grid
@@ -592,6 +670,7 @@ function applyFigureLayouts(units) {
 
 function separator(previous, next) {
     if (previous.kind === 'marker') return '\n';
+    if (previous.kind === 'text-figure-line' && (next.kind === 'text-figure-line' || next.text === '>')) return '\n';
     if (previous.kind === 'list' && next.kind === 'list') return '\n';
     return '\n\n';
 }
@@ -624,7 +703,8 @@ function sourceMapEntry(unit, from, to, unitFrom = from) {
     if (!fragments.length) return null;
     if (unit.kind === 'image') {
         const location = { pageIndex: fragments[0].fragment.pageIndex, bbox: [...fragments[0].fragment.bbox] };
-        const captions = (unit.pieces || []).filter(piece => piece.part === 'caption' && piece.sourceBlockId && piece.bbox);
+        const captions = (unit.pieces || []).filter(piece => piece.bbox
+            && (piece.part === 'caption' && piece.sourceBlockId || piece.part === 'figure-text'));
         return { type: unit.type, markdownFrom: from, markdownTo: to,
             locations: [location, ...captions.map(piece => ({ pageIndex: piece.pageIndex, bbox: [...piece.bbox] }))],
             ...(captions.length ? { locationRanges: imageCaptionSourceRanges(captions, unitFrom, from, to, location) } : {}) };

@@ -1,5 +1,6 @@
 import { renderInlineMathTextHTML, renderMarkdownHTML, renderSelectionMathHTML } from '../markdown/markdown-html.js';
 import { translateEnglish } from '../i18n/localization.js';
+import { alignedCaptionTextRange, alignRenderedCaptions } from './rendered-source-alignment.js';
 
 export function appendRenderedMarkdown(
     container,
@@ -136,10 +137,44 @@ export function installRenderedImagePreview(
     });
 }
 
-export function installRenderedCitations(container, citations = []) {
-    const target = container.querySelector('figcaption, table') || container;
-    if (!target || !citations.length) return;
+export function installRenderedCitations(container, citations = [], figureSource = null) {
+    if (!citations.length) return;
+    const caption = container.querySelector('figcaption');
+    if (caption && figureSource) {
+        const unplaced = installAlignedCaptionCitations(container, citations, figureSource);
+        if (unplaced) {
+            const table = container.querySelector('table');
+            if (table) installCitationsByText(table, unplaced);
+            return;
+        }
+    }
+    const target = caption || container.querySelector('table') || container;
+    installCitationsByText(target, citations);
+}
 
+function installAlignedCaptionCitations(container, citations, { source, from }) {
+    const captions = alignRenderedCaptions(container, source);
+    if (!captions.length) return null;
+    const outsideCaptions = [];
+    // Wrapping splits text nodes. Place later ranges first so earlier
+    // offsets in the same text node are still valid.
+    for (let index = citations.length - 1; index >= 0; index--) {
+        const citation = citations[index];
+        const range = { from: citation.from - from, to: citation.to - from };
+        const caption = captions.find(candidate => (
+            candidate.from <= range.from && range.to <= candidate.to
+        ));
+        if (!caption) {
+            outsideCaptions.push(citation);
+            continue;
+        }
+        const domRange = alignedCaptionTextRange(caption, range);
+        if (domRange?.toString() === citation.text) wrapCitationRange(domRange, citation);
+    }
+    return outsideCaptions.reverse();
+}
+
+function installCitationsByText(target, citations) {
     const targetText = target.textContent || '';
     let markerSearchFrom = 0;
     let previousMarkerFrom = null;
@@ -194,7 +229,15 @@ function wrapRenderedText(target, from, length, citation) {
     const range = document.createRange();
     range.setStart(startNode, startOffset);
     range.setEnd(endNode, endOffset);
-    const element = document.createElement('span');
+    wrapCitationRange(range, citation);
+}
+
+function wrapCitationRange(range, citation) {
+    const ancestor = range.commonAncestorContainer;
+    const parent = ancestor.nodeType === 1 ? ancestor : ancestor.parentElement;
+    if (parent?.closest('a') || (range.startContainer !== range.endContainer
+        && range.cloneContents().querySelector('a'))) return;
+    const element = parent.ownerDocument.createElement('span');
     element.className = citation.className;
     for (const [name, value] of Object.entries(citation.attributes)) {
         element.setAttribute(name, value);

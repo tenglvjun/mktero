@@ -163,6 +163,7 @@ function run(cache, namespace, markdown, deps, analyze) {
 
 export function computeDocumentFigures(cache, markdown, {
     figureMap = null,
+    sourceMap = null,
     viewRanges = null,
     viewKind = 'original',
 } = {}) {
@@ -170,12 +171,13 @@ export function computeDocumentFigures(cache, markdown, {
     // normalising it here keeps one entry per distinct result instead of one
     // per caller.
     const ranges = viewKind === 'original' ? null : viewRanges;
+    const locations = viewKind === 'original' ? sourceMap : null;
     return run(
         cache,
         NAMESPACE_FIGURES,
         markdown,
-        [figureMap, viewKind, ranges],
-        () => analyzeDocumentFigures(markdown, { figureMap, viewRanges, viewKind })
+        [figureMap, viewKind, ranges, locations],
+        () => analyzeDocumentFigures(markdown, { figureMap, sourceMap: locations, viewRanges, viewKind })
     );
 }
 

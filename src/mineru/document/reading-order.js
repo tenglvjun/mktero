@@ -125,27 +125,26 @@ function overlapShare(left, right) {
 // `column` (0-based, or 'span' for a block across the gutter); the page
 // records the column count.
 export function assignPageColumns(blocks) {
+    const layout = measurePageColumns(blocks);
+    for (const block of blocks) block.column = columnOfBox(block.bbox, layout);
+    return { columns: layout.columns, width: layout.textWidth, gutters: layout.gutters };
+}
+
+export function measurePageColumns(blocks) {
     const text = blocks.filter(block => isFlowBlock(block) && block.bbox);
-    if (!text.length) return { columns: 1, width: 0, gutters: [] };
+    if (!text.length) return { columns: 1, textWidth: 0, gutters: [] };
     const left = Math.min(...text.map(block => block.bbox[0]));
     const right = Math.max(...text.map(block => block.bbox[2]));
     const width = Math.max(1, right - left);
     const narrow = text.filter(block => block.bbox[2] - block.bbox[0] < SPAN_SHARE * width);
     const gutters = findGutters(narrow, width);
-    const margin = GUTTER_MARGIN_SHARE * width;
-    for (const block of blocks) {
-        if (!block.bbox || !gutters.length) {
-            block.column = 0;
-            continue;
-        }
-        const crosses = gutters.some(gutter => (
-            block.bbox[0] < gutter.from - margin && block.bbox[2] > gutter.to + margin
-        ));
-        block.column = crosses || block.bbox[2] - block.bbox[0] >= SPAN_SHARE * width
-            ? 'span'
-            : gutters.filter(gutter => (gutter.from + gutter.to) / 2 < center(block.bbox)).length;
-    }
-    return { columns: gutters.length + 1, width, gutters };
+    return { columns: gutters.length + 1, textWidth: width, gutters };
+}
+
+export function boxesSharePageColumn(first, second, layout) {
+    const a = columnOfBox(first, layout);
+    const b = columnOfBox(second, layout);
+    return a === b || a === 'span' || b === 'span';
 }
 
 // Column of any box on a page with the given layout: 'span' across a

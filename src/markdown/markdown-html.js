@@ -13,7 +13,9 @@ import {
     parseFigureLayoutMarker,
     parseAcademicFigureCaption,
     parseLooseAcademicFigureCaption,
+    parseTextFigureBlock,
     splitTrailingAcademicFigureCaption,
+    TEXT_FIGURE_MARKER,
 } from './markdown-figures.js';
 import { parseMarkdownDirective, SECTION_LABEL_KEYS } from './markdown-directives.js';
 import { isNumericCitationContent } from './text-normalization.js';
@@ -207,6 +209,7 @@ function renderMarkdownDocumentHTML(
             createMathBlockExtension(mathBudget, target),
             createMathInlineExtension(mathBudget, target, resolveMathCitation),
             createAcademicTableExtension(mathBudget, target),
+            createTextFigureExtension(mathBudget, target),
         ],
     });
     const algorithmHTML = renderStandaloneMinerUAlgorithm(
@@ -250,7 +253,7 @@ function renderParsedMarkdown(markdown, parser) {
     const transformedTokens = transformBlockTokens(tokens, parser.Lexer, parser.defaults, {
         links: tokens.links,
     });
-    const groupedTokens = groupAcademicTableTokens(transformedTokens);
+    const groupedTokens = groupTextFigureTokens(groupAcademicTableTokens(transformedTokens));
     annotateMarkdownDirectiveTokens(groupedTokens);
     groupedTokens.links = tokens.links;
     return parser.parser(groupedTokens);
@@ -409,6 +412,7 @@ function renderStandaloneAcademicFigureGroup(
         || markdown.slice(group.to).trim()) {
         return null;
     }
+    if (group.textBody) return null;
 
     const panels = group.images.map(image => {
         const tokens = parser.lexer(image.source);
@@ -685,10 +689,7 @@ function renderCaptionMathSource(
     target = 'mktero',
     { imageEscapes = false, links = true } = {}
 ) {
-    const matches = selectNonOverlappingRanges(
-        findCaptionMathMatches(source, imageEscapes),
-        links ? findCaptionLinkMatches(source) : []
-    );
+    const matches = findCaptionInlineMatches(source, { imageEscapes, links });
     let html = '';
     let offset = 0;
     for (const match of matches) {
@@ -711,6 +712,13 @@ function renderCaptionMathSource(
         offset = match.end;
     }
     return html + escapeHTML(unescapeCaptionText(source.slice(offset)));
+}
+
+export function findCaptionInlineMatches(source, { imageEscapes = false, links = true } = {}) {
+    return selectNonOverlappingRanges(
+        findCaptionMathMatches(source, imageEscapes),
+        links ? findCaptionLinkMatches(source) : []
+    );
 }
 
 function findCaptionLinkMatches(source) {
@@ -845,6 +853,41 @@ function createAcademicTableExtension(mathBudget, target = 'mktero') {
             );
         },
     };
+}
+
+function createTextFigureExtension(mathBudget, target) {
+    return {
+        name: 'mkteroTextFigure',
+        renderer(token) {
+            return '<figure class="mktero-figure">'
+                + this.parser.parse(token.body)
+                + renderFigureCaption(token.caption, mathBudget, null, target)
+                + '</figure>\n';
+        },
+    };
+}
+
+function groupTextFigureTokens(tokens) {
+    const grouped = [];
+    for (let index = 0; index < tokens.length; index++) {
+        const marker = tokens[index];
+        const quote = tokens[index + 1];
+        if (marker.type !== 'html' || marker.text.trimEnd() !== TEXT_FIGURE_MARKER
+            || quote?.type !== 'blockquote') {
+            grouped.push(marker);
+            continue;
+        }
+        const raw = marker.raw + quote.raw;
+        const figure = parseTextFigureBlock(raw);
+        const captionIndex = quote.tokens.findLastIndex(token => token.type !== 'space');
+        if (!figure || quote.tokens[captionIndex]?.type !== 'paragraph') {
+            grouped.push(marker);
+            continue;
+        }
+        grouped.push({ type: 'mkteroTextFigure', raw, caption: figure.caption, body: quote.tokens.slice(0, captionIndex) });
+        index++;
+    }
+    return grouped;
 }
 
 function groupAcademicTableTokens(tokens) {

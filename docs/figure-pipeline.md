@@ -272,6 +272,27 @@ own separate table heading keeps its HTML when another figure's heading was
 filed under it. This repairs only the relationships that evidence supports; it
 is not a promise that any particular wrong caption is corrected.
 
+### Caption ownership in MinerU documents
+
+Mktero uses the printed caption and the figure's body bounds to match
+legends on the same page. Column boundaries, intervening prose and figures,
+and competing numbered captions constrain the match. A repair requires one
+supported owner. Ambiguous cases fall back to the original OCR content.
+
+Lettered subcaptions can establish one numbered figure across multiple rows.
+Mktero checks their locations, the sequence of letters, and any panel letters
+named by the printed legend. When rendering a PDF crop fails, the verified
+grid, its images, and their individual subcaptions remain readable around one
+selectable main caption.
+
+If the PDF prints a separate table label, such as `TABLE IV`, beside a title
+that matches the OCR, Mktero can recover that number for a uniquely located
+table and retain its selectable HTML cells. A compact titled list followed by
+a numbered figure caption can also become a selectable text figure when the
+PDF text verifies the title, list, and caption on the same page. The reader
+can jump to its PDF region and to source-mapped images that use the OCR
+fallback.
+
 ## Progressive rendering
 
 Reading starts as soon as conversion finishes. Each pending figure shows an
