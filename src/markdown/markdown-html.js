@@ -689,10 +689,7 @@ function renderCaptionMathSource(
     target = 'mktero',
     { imageEscapes = false, links = true } = {}
 ) {
-    const matches = selectNonOverlappingRanges(
-        findCaptionMathMatches(source, imageEscapes),
-        links ? findCaptionLinkMatches(source) : []
-    );
+    const matches = findCaptionInlineMatches(source, { imageEscapes, links });
     let html = '';
     let offset = 0;
     for (const match of matches) {
@@ -715,6 +712,13 @@ function renderCaptionMathSource(
         offset = match.end;
     }
     return html + escapeHTML(unescapeCaptionText(source.slice(offset)));
+}
+
+export function findCaptionInlineMatches(source, { imageEscapes = false, links = true } = {}) {
+    return selectNonOverlappingRanges(
+        findCaptionMathMatches(source, imageEscapes),
+        links ? findCaptionLinkMatches(source) : []
+    );
 }
 
 function findCaptionLinkMatches(source) {

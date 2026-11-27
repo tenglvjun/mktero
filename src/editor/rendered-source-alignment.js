@@ -1,5 +1,6 @@
+import { parser as markdownParser } from '@lezer/markdown';
 import { collectFigureImageNodes } from '../figures/figure-model.js';
-import { findInlineMathMatches } from '../markdown/markdown-html.js';
+import { findCaptionInlineMatches, findInlineMathMatches } from '../markdown/markdown-html.js';
 import { parseGFMTable } from '../markdown/markdown-tables.js';
 import {
     createVisibleMarkdownTextIndex,
@@ -27,13 +28,19 @@ export function alignRenderedCaptions(container, source) {
     const aligned = [];
     pairWithCandidates(
         [...container.querySelectorAll('figcaption')],
-        figureCaptionSourceCandidates(source).map(range => ({
-            ...range,
-            entries: rawSourceEntries(source, range.from, range.to),
-        })),
-        (element, atoms) => aligned.push({ element, atoms })
+        figureCaptionSourceEntries(source),
+        (element, atoms, { from, to }) => aligned.push({ element, atoms, from, to })
     );
     return aligned;
+}
+
+export function alignedCaptionTextRange(caption, sourceRange) {
+    const span = spanIn(caption.atoms, sourceRange);
+    if (!span || span.first.math || span.last.math
+        || span.first.from !== sourceRange.from || span.last.to !== sourceRange.to) {
+        return null;
+    }
+    return spanDOMRange(caption.element.ownerDocument, span);
 }
 
 // Places each annotation whose visible text lies in aligned captions and
@@ -153,10 +160,7 @@ function prepareRenderedAlignment(container, source, { figureCaptions = true } =
     if (figureCaptions) {
         pairWithCandidates(
             [...container.querySelectorAll('figcaption')],
-            figureCaptionSourceCandidates(source).map(range => ({
-                ...range,
-                entries: rawSourceEntries(source, range.from, range.to),
-            })),
+            figureCaptionSourceEntries(source),
             add
         );
     }
@@ -382,7 +386,7 @@ function outsideLineCandidates(source, regions) {
 function figureCaptionSourceCandidates(source) {
     const candidates = collectFigureImageNodes(source)
         .filter(image => image.captionRange.to > image.captionRange.from)
-        .map(image => image.captionRange);
+        .map(image => ({ ...image.captionRange, imageEscapes: true }));
     let offset = 0;
     for (const line of source.split('\n')) {
         const trimmed = line.trim();
@@ -393,6 +397,15 @@ function figureCaptionSourceCandidates(source) {
         offset += line.length + 1;
     }
     return candidates.sort((left, right) => left.from - right.from);
+}
+
+function figureCaptionSourceEntries(source) {
+    return figureCaptionSourceCandidates(source).map(range => ({
+        ...range,
+        entries: rawSourceEntries(source, range.from, range.to, {
+            imageEscapes: range.imageEscapes,
+        }),
+    }));
 }
 
 // An element as the reader sees it: each visible non-space character with
@@ -465,16 +478,33 @@ function skippableEntry(entry) {
 }
 
 // The characters of `source.slice(from, to)`, each formula as one entry.
-function rawSourceEntries(source, from, to) {
+function rawSourceEntries(source, from, to, captionOptions = null) {
     const text = source.slice(from, to);
     const entries = [];
     let cursor = 0;
-    for (const formula of findInlineMathMatches(text)) {
-        for (; cursor < formula.start; cursor++) {
+    const matches = captionOptions
+        ? findCaptionInlineMatches(text, captionOptions)
+        : findInlineMathMatches(text);
+    for (const match of matches) {
+        for (; cursor < match.start; cursor++) {
             entries.push(characterEntry(text[cursor], from + cursor));
         }
-        entries.push({ math: true, from: from + formula.start, to: from + formula.end });
-        cursor = formula.end;
+        if (match.link) {
+            // Marked unescapes brackets in the label. Read its closing
+            // delimiter from the raw link to keep the original offsets.
+            const link = markdownParser.parse(match.link.raw).topNode.firstChild?.firstChild;
+            const labelEnd = link?.getChildren('LinkMark')[1]?.from;
+            if (link?.name !== 'Link' || labelEnd == null) return null;
+            const linkFrom = from + match.start;
+            entries.push(...rawSourceEntries(source, linkFrom + 1, linkFrom + labelEnd, {
+                ...captionOptions,
+                links: false,
+            }));
+        }
+        else {
+            entries.push({ math: true, from: from + match.start, to: from + match.end });
+        }
+        cursor = match.end;
     }
     for (; cursor < text.length; cursor++) {
         entries.push(characterEntry(text[cursor], from + cursor));

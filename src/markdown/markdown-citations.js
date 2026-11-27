@@ -84,11 +84,14 @@ function isEscapedAuthorNoteCommand(source, index) {
 
 export function analyzeMarkdownCitations(markdown) {
     const source = String(markdown || '');
-    const searchable = maskNonProseBlocks(source);
+    let tree;
+    const getTree = () => tree ??= markdownParser.parse(source);
+    const searchable = maskNonProseBlocks(source, getTree);
     const bibliographies = findBibliographies(searchable);
     const frontMatterEnd = bibliographies[0]?.sections[0].headingFrom ?? source.length;
     const frontMatter = analyzeFrontMatter(source, frontMatterEnd);
     const citations = [...frontMatter.citations];
+    let bracketExclusions;
     for (const { sections, references, scopeFrom } of bibliographies) {
         const bodyFrom = Math.max(scopeFrom, frontMatter.bodyFrom);
         const bodyRanges = [];
@@ -102,8 +105,13 @@ export function analyzeMarkdownCitations(markdown) {
             }
             from = Math.max(from, section.to);
         }
-        for (const citation of findNumericCitations(searchable, bodyRanges, references)) {
-            citations.push(citation);
+        if (references.some(reference => Number.isInteger(reference.number))) {
+            bracketExclusions ??= findBracketCitationExclusions(source, getTree);
+            for (const citation of findNumericCitations(
+                searchable, bodyRanges, references, bracketExclusions
+            )) {
+                citations.push(citation);
+            }
         }
         const referencesByYear = groupReferencesByYear(references);
         for (const range of bodyRanges) {
@@ -124,14 +132,13 @@ export function analyzeMarkdownCitations(markdown) {
     };
 }
 
-function maskNonProseBlocks(source) {
+function maskNonProseBlocks(source, getTree) {
     if (!source.includes('```') && !source.includes('~~~') && !source.includes('<!--')) {
         return source;
     }
     const parts = [];
     let from = 0;
-    const tree = markdownParser.parse(source);
-    for (let block = tree.topNode.firstChild; block; block = block.nextSibling) {
+    for (let block = getTree().topNode.firstChild; block; block = block.nextSibling) {
         if (block.name !== 'FencedCode' && block.name !== 'CommentBlock') continue;
         parts.push(source.slice(from, block.from));
         // Keep offsets and line boundaries for citation and reference targets.
@@ -141,6 +148,24 @@ function maskNonProseBlocks(source) {
     if (!parts.length) return source;
     parts.push(source.slice(from));
     return parts.join('');
+}
+
+function findBracketCitationExclusions(source, getTree) {
+    if (!['](', '][', ']:', '`'].some(marker => source.includes(marker))) return [];
+    const exclusions = [];
+    getTree().iterate({
+        enter(node) {
+            // Lezer also represents bare [n] as Link, without a destination.
+            const explicitLink = node.name === 'Link'
+                && (node.node.getChild('URL') || node.node.getChild('LinkLabel'));
+            if (explicitLink || ['URL', 'LinkReference', 'InlineCode', 'CodeBlock'].includes(node.name)) {
+                exclusions.push({ from: node.from, to: node.to });
+                return false;
+            }
+            return undefined;
+        },
+    });
+    return exclusions;
 }
 
 function findAuthorAffiliationsStart(markdown, from, to) {
@@ -886,14 +911,12 @@ function createReference({ id, number, text, source, from, to }) {
     };
 }
 
-function findNumericCitations(markdown, bodyRanges, references) {
+function findNumericCitations(markdown, bodyRanges, references, bracketExclusions) {
     const byNumber = new Map(
         references
             .filter(reference => Number.isInteger(reference.number))
             .map(reference => [reference.number, reference])
     );
-    if (!byNumber.size) return [];
-
     const styles = {
         bracket: { citations: [], count: 0 },
         parenthetical: { citations: [], count: 0 },
@@ -902,7 +925,7 @@ function findNumericCitations(markdown, bodyRanges, references) {
     };
     for (const { from, to } of bodyRanges) {
         for (const { style, citations } of numericCitationContainers(
-            markdown, from, to, byNumber
+            markdown, from, to, byNumber, bracketExclusions
         )) {
             styles[style].citations.push(...citations);
             styles[style].count++;
@@ -930,21 +953,29 @@ function findNumericCitations(markdown, bodyRanges, references) {
     ];
 }
 
-function* numericCitationContainers(markdown, bodyFrom, bodyEnd, byNumber) {
+function* numericCitationContainers(markdown, bodyFrom, bodyEnd, byNumber, bracketExclusions) {
     const body = markdown.slice(bodyFrom, bodyEnd);
     const numericEnumerationStarts = findNumericEnumerationStarts(body);
     const containers = [
-        { pattern: /\[([^\]\r\n]{1,80})\]/g, squareBrackets: true },
+        // An image description can enclose a bracket citation. Its own
+        // opening bracket must not consume the citation nested inside it.
+        { pattern: /(?<!\\)\\*\[([^[\]\\\r\n]{1,80})\\*\]/g, squareBrackets: true },
         { pattern: /\(([^()\r\n]{1,80})\)/g, squareBrackets: false },
         { pattern: /（([^（）\r\n]{1,80})）/g, squareBrackets: false },
     ];
     for (const { pattern, squareBrackets } of containers) {
+        let exclusionIndex = 0;
         for (const match of body.matchAll(pattern)) {
+            if (squareBrackets) {
+                const from = bodyFrom + match.index;
+                while (bracketExclusions[exclusionIndex]?.to <= from) exclusionIndex++;
+                if (bracketExclusions[exclusionIndex]?.from < from + match[0].length) continue;
+            }
             const after = body[match.index + match[0].length] || '';
             const before = body[match.index - 1] || '';
             if (squareBrackets
                 && (before === '!'
-                    || ['(', '[', ':'].includes(after)
+                    || ['(', '['].includes(after)
                     || squareBracketLooksStatistical(body, match)
                     || squareBracketIsSuperscriptContent(body, match))) {
                 continue;
@@ -1207,7 +1238,7 @@ function normalizeSuperscriptCharacters(value) {
 function numericCitationsInContainer(match, offset, byNumber) {
     return numericCitationsInText(
         match[1],
-        offset + match.index + 1,
+        offset + match.index + match[0].indexOf(match[1]),
         byNumber
     );
 }

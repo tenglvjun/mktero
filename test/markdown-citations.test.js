@@ -50,6 +50,50 @@ test('maps numeric citation tags and ranges to numbered references', () => {
     )));
 });
 
+test('matches numeric citation containers inside image descriptions at their original offsets', () => {
+    const markdown = [
+        'Evidence in the main text [1].',
+        '',
+        '![Figure 1. Adapted from \\[2, 3–4\\]: details follow.](images/first.png)',
+        '',
+        '![Figure 2. Replicated from [3].](images/second.png)',
+        '',
+        '![Figure 3. Archived citation \\\\\\[4\\\\\\].](images/third.png)',
+        '',
+        '![Figure 4. See \\[5\\](https://example.org), F\\[2,3\\] = 6, and \\[9\\].](images/fourth.png)',
+        '',
+        '[A link label containing \\[5\\]](https://example.org), and a code sample `\\[5\\]`.',
+        '',
+        '![Figure 5. Rare occurrence.](<images/page[5].png>)',
+        '',
+        '## References',
+        '',
+        '[1] Alpha A. First paper. 2020.',
+        '[2] Beta B. Second paper. 2021.',
+        '[3] Gamma G. Third paper. 2022.',
+        '[4] Delta D. Fourth paper. 2023.',
+        '[5] Epsilon E. Fifth paper. 2024.',
+    ].join('\n');
+    const labels = [
+        ['[1]', '1', ['number:1']],
+        ['[2, 3–4', '2', ['number:2']],
+        ['3–4', '3–4', ['number:3', 'number:4']],
+        ['[3]', '3', ['number:3']],
+        ['[4\\', '4', ['number:4']],
+    ];
+
+    assert.deepEqual(
+        analyzeMarkdownCitations(markdown).citations.map(({ from, to, referenceIds }) => (
+            [from, markdown.slice(from, to), referenceIds]
+        )),
+        labels.map(([marker, label, ids]) => [
+            markdown.indexOf(marker) + marker.indexOf(label),
+            label,
+            ids,
+        ])
+    );
+});
+
 test('attaches normalized identifiers to analyzed reference targets', () => {
     const markdown = [
         '# Paper',
