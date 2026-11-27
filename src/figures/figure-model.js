@@ -91,7 +91,7 @@ export function validateFigureInput(input) {
         for (const range of block.sourceRanges || []) {
             validateRange(range, input.markdown.length);
             consumed.push({ from: range.from, to: range.to,
-                assetPath: block.assetPath, role: block.role });
+                assetPath: block.assetPath, role: block.role, embeddedCaption: block.embeddedCaption });
         }
         if (block.assetPath) normalizeFigureAssetPath(block.assetPath, input.assetBasePath || '');
         if (block.text !== undefined && (typeof block.text !== 'string'
@@ -445,7 +445,8 @@ function ensureNonOverlapping(ranges, code) {
         if (outer && range.from < outer.to) {
             // A caption attached inside an image description is nested, not a
             // conflict; the transaction collapses the pair into one edit.
-            const nestedCaption = outer.assetPath && range.role === 'caption'
+            const nestedCaption = outer.assetPath && (range.role === 'caption'
+                || range.role === 'figure-text' && range.embeddedCaption === true)
                 && range.from >= outer.from && range.to <= outer.to;
             if (!nestedCaption) throw figureError(code, 'Figure source ranges overlap');
             continue;

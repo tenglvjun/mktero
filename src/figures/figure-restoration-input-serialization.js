@@ -12,6 +12,7 @@ export function serializeFigureRestorationInput(input, { maxBytes = FIGURE_LIMIT
     const projection = {
         schemaVersion: INPUT_SCHEMA_VERSION,
         provider: input.provider,
+        ...(input.rangesExplicit === true ? { rangesExplicit: true } : {}),
         markdown: input.markdown,
         assetBasePath: input.assetBasePath || '',
         assets: input.assets.map(asset => ({
@@ -64,6 +65,7 @@ export function parseFigureRestorationInputJSON(json, { document, maxBytes = FIG
     }
     const input = {
         provider: projection.provider,
+        ...(projection.rangesExplicit === true ? { rangesExplicit: true } : {}),
         markdown: projection.markdown,
         assetBasePath: projection.assetBasePath || '',
         assets,

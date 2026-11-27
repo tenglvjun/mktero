@@ -112,13 +112,8 @@ export function planFigureLayouts(markdown, imageBlocks = [], {
         }
 
         const ending = lineEnding(lines[index].raw) || '\n';
-        let marker = `<!-- mktero-figure-layout: columns=${layout.columns}`
-            + ` rows=${layout.rows.join(',')}`;
-        if (layout.spans.some(span => span > 1)) {
-            marker += ` spans=${layout.spans.join(',')}`;
-        }
         const markerIndex = precedingCaption ? precedingCaptionIndex : index;
-        markers.set(markerIndex, `${marker} -->${ending}`);
+        markers.set(markerIndex, `${figureLayoutMarker(layout)}${ending}`);
         index = trailingCaption ? captionIndex : imageLines.at(-1).index;
     }
 
@@ -217,7 +212,12 @@ function inferFigureLayout(imageCount, blocks, allowFallback) {
     return allowFallback ? inferFallbackLayout(imageCount) : null;
 }
 
-function inferGeometryLayout(blocks) {
+export function figureLayoutMarker({ columns, rows, spans }) {
+    const widths = spans.some(span => span > 1) ? ` spans=${spans.join(',')}` : '';
+    return `<!-- mktero-figure-layout: columns=${columns} rows=${rows.join(',')}${widths} -->`;
+}
+
+export function inferGeometryLayout(blocks) {
     const items = blocks.map((block, index) => {
         const box = block.bbox;
         return {

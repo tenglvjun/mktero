@@ -39,17 +39,18 @@ export function createFigureInputFromIR(ir, serialized, bundle = {}) {
         const range = [{ from: piece.from, to: piece.to }];
         if (piece.part === 'panel' || source.pdfFigureProposal && source.kind === 'table'
             && piece.key === source.children.find(child => child.kind === 'body')?.id) {
-            if (!groups.has(source.id)) {
-                groups.add(source.id);
+            const groupId = piece.parentId || source.id;
+            if (!groups.has(groupId)) {
+                groups.add(groupId);
                 pushSource({
-                    id: source.id, pageIndex: source.pageIndex, type: source.kind, role: 'unknown',
-                    bboxKind: 'group', bbox: groupBBox(source), text: '',
+                    id: groupId, pageIndex: source.pageIndex, type: source.kind, role: 'unknown',
+                    bboxKind: 'group', bbox: validBBox(source.verifiedFigure?.bbox) || groupBBox(source), text: '',
                     sourceRanges: [], rangeEvidence: 'unresolved',
                 });
             }
             pushSource({
                 id: piece.key, pageIndex: source.pageIndex, type: source.kind, role: 'panel',
-                bboxKind: 'visual-body', bbox, assetPath: piece.assetPath, parentId: source.id, text: '',
+                bboxKind: 'visual-body', bbox, assetPath: piece.assetPath, parentId: groupId, text: '',
                 sourceRanges: range, rangeEvidence: 'explicit-range',
             });
             continue;
@@ -57,7 +58,7 @@ export function createFigureInputFromIR(ir, serialized, bundle = {}) {
         if (piece.part === 'caption' && piece.parentId) {
             pushSource({
                 id: piece.key, pageIndex: source.pageIndex, type: 'caption', role: 'caption',
-                bboxKind: 'caption', bbox, parentId: piece.parentId, embeddedCaption: true,
+                bboxKind: 'caption', bbox, parentId: piece.parentId, embeddedCaption: piece.parentId === source.id,
                 text: boundedText(piece.text), sourceRanges: range, rangeEvidence: 'explicit-range',
             });
             continue;
@@ -65,10 +66,12 @@ export function createFigureInputFromIR(ir, serialized, bundle = {}) {
         // A footnote MinerU grouped into an image is figure text of that
         // figure, as in MinerU's own block; the resolver decides by distance
         // whether the crop owns it. A body note attached later stays body.
-        if ((piece.part === 'note' || piece.part === 'figure-text') && groups.has(source.id)) {
+        const parentId = piece.parentId || source.verifiedFigure?.id || source.id;
+        if ((piece.part === 'note' || piece.part === 'figure-text') && groups.has(parentId)) {
             push({
                 id: piece.key, pageIndex: source.pageIndex, type: 'text', role: 'figure-text',
-                bboxKind: 'text', bbox, parentId: source.id, text: boundedText(piece.text),
+                bboxKind: 'text', bbox, parentId, text: boundedText(piece.text),
+                ...(piece.parentId ? { embeddedCaption: true } : {}),
                 sourceRanges: range, rangeEvidence: 'explicit-range',
             });
             continue;
@@ -150,7 +153,8 @@ function nativeFigurePiece(source, piece, markdown) {
 // `body` block it is never consumed into a composed figure. Other text keeps
 // the role the region resolver expects from MinerU paragraphs.
 function pieceRole(piece) {
-    if (piece.part === 'note' || piece.part === 'table' || piece.part === 'code' || piece.part === 'equation') {
+    if (piece.part === 'note' || piece.part === 'table' || piece.part === 'code' || piece.part === 'equation'
+        || piece.part === 'text-figure') {
         return 'body';
     }
     return parseAcademicFigureCaption(piece.text) ? 'caption' : 'unknown';

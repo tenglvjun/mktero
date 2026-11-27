@@ -1,4 +1,5 @@
 import { FIGURE_LIMITS, FIGURE_PIPELINE_PROFILE } from './figure-limits.js';
+import { isValidSourceMapEntry, resolveSourceMapSelectionLocation } from '../core/markdown-source-map.js';
 import {
     assertFigureJSONBudget, collectFigureImageNodes, normalizeFigureAssetPath,
 } from './figure-model.js';
@@ -9,10 +10,11 @@ import {
 } from '../markdown/markdown-figures.js';
 
 export function analyzeDocumentFigures(markdown, {
-    figureMap = null, viewRanges = null, viewKind = 'original',
+    figureMap = null, sourceMap = null, viewRanges = null, viewKind = 'original',
 } = {}) {
     const source = String(markdown || '');
     const records = figureRecords(figureMap);
+    const locate = sourceMapLocator(viewKind === 'original' ? sourceMap : null, source.length);
     const findSourceBlock = sourceBlockFinder(viewKind === 'original' ? null : viewRanges);
     const images = records.length ? collectFigureImageNodes(source) : [];
     const imagesByPath = new Map();
@@ -66,10 +68,10 @@ export function analyzeDocumentFigures(markdown, {
     let from = 0;
     for (const figure of restored) {
         if (figure.from < from) continue;
-        figures.push(...legacyViews(source.slice(from, figure.from), from, viewKind), figure);
+        figures.push(...legacyViews(source.slice(from, figure.from), from, viewKind, locate), figure);
         from = figure.to;
     }
-    figures.push(...legacyViews(source.slice(from), from, viewKind));
+    figures.push(...legacyViews(source.slice(from), from, viewKind, locate));
     return figures;
 }
 
@@ -188,13 +190,37 @@ function comparisonCaption(source, record, block, image) {
     return { ...range, text };
 }
 
-function legacyViews(source, offset, viewKind) {
+function legacyViews(source, offset, viewKind, locate) {
     return findAcademicFigures(source).map(figure => ({
         ...figure, from: offset + figure.from, to: offset + figure.to,
         id: `legacy-figure-${offset + figure.from}:${viewKind}`,
         sourceId: null, viewKind, label: figure.caption?.label || '',
-        imageRange: null, translatedCaption: null, panels: [], location: null,
+        imageRange: null, translatedCaption: null, panels: [],
+        location: locate({ from: offset + figure.from, to: offset + figure.to }),
     }));
+}
+
+// The figures are visited in document order. Use only the mapped entries
+// within each figure, and require that they agree on its page.
+function sourceMapLocator(sourceMap, documentLength) {
+    if (!Array.isArray(sourceMap)) return () => null;
+    const entries = sourceMap.filter(entry => isValidSourceMapEntry(entry, documentLength))
+        .sort((left, right) => left.markdownFrom - right.markdownFrom);
+    let cursor = 0;
+    return range => {
+        while (cursor < entries.length && entries[cursor].markdownTo <= range.from) cursor++;
+        const group = [];
+        for (let index = cursor; index < entries.length && entries[index].markdownFrom < range.to; index++) {
+            const entry = entries[index];
+            if (entry.markdownFrom < range.from || entry.markdownTo > range.to) return null;
+            group.push(entry);
+        }
+        const pageIndex = group[0]?.locations[0]?.pageIndex;
+        if (pageIndex === undefined || group.some(entry => entry.locations.some(location => location.pageIndex !== pageIndex))) {
+            return null;
+        }
+        return resolveSourceMapSelectionLocation(group, range, documentLength);
+    };
 }
 
 function localPath(value) {

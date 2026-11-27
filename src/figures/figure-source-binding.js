@@ -127,7 +127,7 @@ export function bindFigureSourceRanges(input, { limits: overrides, budget: share
 // matching text again could only lose precision. The ranges are checked,
 // not searched: each lies inside the Markdown, a panel range is exactly one
 // standalone image of the panel's asset, and the only overlap allowed is a
-// caption inside its panel's image description.
+// caption or verified panel description inside its panel's image description.
 export function checkExplicitSourceRanges(input) {
     const length = String(input.markdown || '').length;
     const images = new Map(collectFigureImageNodes(input.markdown)
@@ -156,9 +156,11 @@ export function checkExplicitSourceRanges(input) {
     let outer = null;
     for (const range of ranges) {
         if (outer && range.from < outer.to) {
-            const nested = outer.block.role === 'panel' && range.block.role === 'caption'
+            const embeddedText = range.block.role === 'figure-text' && range.block.embeddedCaption === true;
+            const alt = embeddedText ? images.get(`${outer.from}:${outer.to}`)?.captionRange : null;
+            const nested = outer.block.role === 'panel' && (range.block.role === 'caption' || embeddedText)
                 && range.block.parentId && range.block.parentId === outer.block.parentId
-                && range.to <= outer.to;
+                && range.to <= outer.to && (!embeddedText || alt && alt.from <= range.from && alt.to >= range.to);
             if (!nested) throw invalidExplicitRange('Figure source ranges overlap');
             continue;
         }

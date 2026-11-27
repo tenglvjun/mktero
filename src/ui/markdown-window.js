@@ -887,6 +887,7 @@ class MarkdownTabView {
             if (!documentLayerUnchanged) {
                 const figureViews = computeDocumentFigures(this.analysisCache, markdown, {
                     figureMap: model.figureMap,
+                    sourceMap: model.sourceMap,
                     viewRanges: model.translationBlockRanges,
                     viewKind: translatedView ? 'translation' : comparisonView ? 'comparison' : 'original',
                 });
@@ -1083,7 +1084,7 @@ class MarkdownTabView {
                         ? computeDocumentFigures(
                             this.analysisCache,
                             model.markdown,
-                            { figureMap: model.figureMap }
+                            { figureMap: model.figureMap, sourceMap: model.sourceMap }
                         )
                         : figureViews,
                     headings
